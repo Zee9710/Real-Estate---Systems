@@ -89,6 +89,10 @@ class DBClient:
         with self._conn() as con:
             con.execute(HISTORICAL_DDL)
             con.execute(INCOMING_DDL)
+            try:
+                con.execute("ALTER TABLE incoming_cases ADD COLUMN source_appended INTEGER DEFAULT 0")
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Historical
