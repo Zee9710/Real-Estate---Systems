@@ -2,12 +2,12 @@
 End-to-end orchestrator: rule → novelty → explain → write-back.
 
 Order of operations (per case):
-1. Parse and validate input row.
+1. Parse input row.
 2. Rule engine → decision + reason_code.
 3. Novelty detector → nn_distance + is_novel_pattern.
 4. Review flagger → needs_review + flag_reason.
 5. Qwen → bilingual explanation.
-6. Write all output columns back to the Incoming_Cases sheet.
+6. Write all output columns back to incoming_cases.
 """
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ import logging
 from datetime import date, datetime
 from typing import Any, Dict, Optional
 
+from .db_client import DBClient
 from .embeddings import EmbeddingService
 from .llm import QwenClient
 from .novelty import NoveltyDetector
 from .review_flagger import evaluate_flags
-from .rule_engine import Case, Decision, evaluate as rule_evaluate
-from .sheets_client import SheetsClient
+from .rule_engine import Case, evaluate as rule_evaluate
 from .vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -32,8 +32,8 @@ DECISION_AR = {
 
 
 def _parse_bool(val: Any) -> bool:
-    if isinstance(val, bool):
-        return val
+    if isinstance(val, (bool, int)):
+        return bool(val)
     s = str(val).strip().lower()
     return s in ("true", "1", "yes", "نعم", "صح")
 
@@ -77,55 +77,43 @@ def row_to_case(row: Dict[str, Any]) -> Case:
 class Recommender:
     def __init__(
         self,
-        sheets: SheetsClient,
+        db: DBClient,
         embedding_service: EmbeddingService,
         vector_store: VectorStore,
         novelty_detector: NoveltyDetector,
         qwen: QwenClient,
         prompt_template: str,
-        incoming_tab: str,
         max_registration_age_years: int = 10,
     ):
-        self.sheets = sheets
+        self.db = db
         self.embeddings = embedding_service
         self.store = vector_store
         self.novelty = novelty_detector
         self.qwen = qwen
         self.prompt_template = prompt_template
-        self.incoming_tab = incoming_tab
         self.max_reg_age = max_registration_age_years
 
     def process_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
         case_id = row.get("case_id", "UNKNOWN")
 
-        # Mark processing
-        try:
-            self.sheets.write_recommendation(
-                self.incoming_tab, case_id, {"status": "processing"}
-            )
-        except Exception as e:
-            logger.warning("Could not set status=processing for %s: %s", case_id, e)
+        self.db.write_recommendation(case_id, {"status": "processing"})
 
         try:
             case = row_to_case(row)
 
-            # 1. Deterministic rule engine
             rule_result = rule_evaluate(case, self.max_reg_age)
             decision = rule_result.decision.value
             reason_code = rule_result.reason_code.value
             decision_ar = DECISION_AR.get(decision, decision)
 
-            # 2. Novelty detection
             novelty_result = self.novelty.check(row)
 
-            # 3. Flag evaluation
             flag_result = evaluate_flags(
                 rule_fired=rule_result.rule_fired,
                 decision=decision,
                 is_novel_pattern=novelty_result.is_novel,
             )
 
-            # 4. Bilingual explanation
             explanation = self.qwen.explain(
                 case_dict=row,
                 decision=decision,
@@ -145,20 +133,18 @@ class Recommender:
                 "retrieved_case_ids": ", ".join(novelty_result.retrieved_ids),
                 "nn_distance": round(novelty_result.nn_distance, 4),
                 "flag_reason": flag_result.flag_reason.value,
-                "needs_review": str(flag_result.needs_review).upper(),
+                "needs_review": 1 if flag_result.needs_review else 0,
                 "processed_at": datetime.utcnow().isoformat(),
                 "status": "done",
             }
 
-            # 5. Write back
-            self.sheets.write_recommendation(self.incoming_tab, case_id, output)
+            self.db.write_recommendation(case_id, output)
             logger.info("Processed %s → %s (%s)", case_id, decision, reason_code)
             return output
 
         except Exception as e:
             logger.error("Error processing %s: %s", case_id, e, exc_info=True)
-            self.sheets.write_recommendation(
-                self.incoming_tab,
+            self.db.write_recommendation(
                 case_id,
                 {"status": "error", "processed_at": datetime.utcnow().isoformat()},
             )

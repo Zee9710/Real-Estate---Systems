@@ -1,9 +1,5 @@
-sheets:
-  spreadsheet_id: "YOUR_SPREADSHEET_ID_HERE"
-  credentials_path: "credentials/google-service-account.json"
-  historical_tab: "Historical_Cases"
-  incoming_tab: "Incoming_Cases"
-  rules_tab: "Acceptance_Rules"
+db:
+  path: "data/cases.db"
 
 poller:
   interval_seconds: 45
@@ -29,5 +25,4 @@ novelty:
 
 rules:
   # How old a registration_date can be (years) before triggering EXPIRED_REGISTRATION.
-  # Confirm this is a real domain rule before tightening.
   max_registration_age_years: 10

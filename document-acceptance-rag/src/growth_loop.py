@@ -5,11 +5,10 @@ The ONLY path for a case to enter the historical dataset is human validation.
 No model has write access to the historical set.
 
 Flow:
-1. Operator sets validated_by on a needs_review=TRUE row in Incoming_Cases.
-2. growth_loop.append_validated() is called (by the poller or /process endpoint).
-3. Case is appended to Historical_Cases with source=validated, added_at, index_version.
-4. seed_chroma() reindexes the new collection version.
-5. NoveltyDetector.calibrate() recalibrates the threshold over the updated set.
+1. Reviewer sets validated_by in the Streamlit UI.
+2. growth_loop.run_batch() detects the row and appends it to historical_cases.
+3. ChromaDB is reindexed with the new version.
+4. NoveltyDetector recalibrates over the updated validated set.
 """
 from __future__ import annotations
 
@@ -17,9 +16,9 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List
 
+from .db_client import DBClient
 from .embeddings import EmbeddingService
 from .novelty import NoveltyDetector
-from .sheets_client import SheetsClient
 from .vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -64,54 +63,53 @@ def seed_collection(
 class GrowthLoop:
     def __init__(
         self,
-        sheets: SheetsClient,
+        db: DBClient,
         vector_store: VectorStore,
         embedding_service: EmbeddingService,
         novelty_detector: NoveltyDetector,
-        historical_tab: str,
-        incoming_tab: str,
     ):
-        self.sheets = sheets
+        self.db = db
         self.store = vector_store
         self.embeddings = embedding_service
         self.novelty = novelty_detector
-        self.historical_tab = historical_tab
-        self.incoming_tab = incoming_tab
-
-    def get_validated_rows(self) -> List[Dict[str, Any]]:
-        """Return Incoming_Cases rows with validated_by set and status=done."""
-        rows = self.sheets.read_incoming(self.incoming_tab)
-        return [
-            r for r in rows
-            if r.get("validated_by", "").strip()
-            and r.get("needs_review", "").upper() == "TRUE"
-            and r.get("status", "") == "done"
-        ]
 
     def append_validated(self, validated_row: Dict[str, Any]) -> str:
         """
-        Append a single validated case to Historical_Cases, reindex, and recalibrate.
+        Append a single validated case to historical_cases, reindex, recalibrate.
         Returns the new index_version.
         """
-        # Compute new version before appending
         new_version = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
 
         historical_row = {
-            **validated_row,
+            "case_id": validated_row["case_id"],
+            "document_type": validated_row.get("document_type", ""),
+            "owner_name": validated_row.get("owner_name", ""),
+            "owner_id": validated_row.get("owner_id", ""),
+            "property_id": validated_row.get("property_id", ""),
+            "property_type": validated_row.get("property_type", ""),
+            "area_sqm": validated_row.get("area_sqm"),
+            "address": validated_row.get("address", ""),
+            "city": validated_row.get("city", ""),
+            "notarized": validated_row.get("notarized", 0),
+            "owner_signature": validated_row.get("owner_signature", 0),
+            "liens_present": validated_row.get("liens_present", 0),
+            "registration_date": validated_row.get("registration_date", ""),
+            "decision": validated_row.get("decision", ""),
+            "reason_code": validated_row.get("reason_code", ""),
+            "recommendation_en": validated_row.get("recommendation_en", ""),
+            "recommendation_ar": validated_row.get("recommendation_ar", ""),
             "source": "validated",
             "added_at": datetime.utcnow().date().isoformat(),
             "index_version": new_version,
         }
-        self.sheets.append_historical(self.historical_tab, historical_row)
+        self.db.append_historical(historical_row)
+        self.db.mark_appended(validated_row["case_id"])
         logger.info("Appended %s to historical set (version %s)", validated_row.get("case_id"), new_version)
 
-        # Reindex
-        all_historical = self.sheets.read_historical(self.historical_tab)
-        validated_only = [r for r in all_historical if r.get("source") == "validated"]
-        version = seed_collection(validated_only, self.store, self.embeddings)
+        all_historical = self.db.read_historical()
+        version = seed_collection(all_historical, self.store, self.embeddings)
 
-        # Recalibrate
-        calibration = self.novelty.calibrate(validated_only)
+        calibration = self.novelty.calibrate(all_historical)
         logger.info(
             "Recalibrated threshold=%.4f (p%d, n=%d)",
             calibration.threshold,
@@ -122,7 +120,7 @@ class GrowthLoop:
 
     def run_batch(self) -> int:
         """Process all pending validated rows. Returns count appended."""
-        rows = self.get_validated_rows()
+        rows = self.db.get_validated_rows()
         count = 0
         for row in rows:
             try:
