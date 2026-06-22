@@ -88,6 +88,7 @@ async def _poll_loop():
     global _poller_running
     interval = cfg["poller"]["interval_seconds"]
     logger.info("Poller started (interval=%ds)", interval)
+    await asyncio.sleep(2)  # let startup complete before first poll
     while _poller_running:
         try:
             _process_pending()
