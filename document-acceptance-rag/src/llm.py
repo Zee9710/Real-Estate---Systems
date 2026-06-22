@@ -43,6 +43,19 @@ class QwenClient:
         retrieved_ids: list[str],
         prompt_template: str,
     ) -> Explanation:
+        if needs_review:
+            reviewer_note_instruction = (
+                ',\n  "reviewer_note_en": "<brief note for the human reviewer in English>",'
+                '\n  "reviewer_note_ar": "<brief note for the human reviewer in Arabic>"'
+            )
+            flagged_instruction = (
+                "5. Because needs_review is true, add reviewer_note_en and reviewer_note_ar "
+                "to explain what the reviewer should check."
+            )
+        else:
+            reviewer_note_instruction = ""
+            flagged_instruction = ""
+
         prompt = prompt_template.format(
             case_json=json.dumps(case_dict, ensure_ascii=False, indent=2),
             decision=decision,
@@ -51,6 +64,8 @@ class QwenClient:
             needs_review=needs_review,
             flag_reason=flag_reason,
             retrieved_ids=", ".join(retrieved_ids) if retrieved_ids else "none",
+            reviewer_note_instruction=reviewer_note_instruction,
+            flagged_instruction=flagged_instruction,
         )
 
         response = httpx.post(

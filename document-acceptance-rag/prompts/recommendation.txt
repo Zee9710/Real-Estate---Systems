@@ -16,8 +16,7 @@ Produce a JSON object with these exact keys:
   "decision_ar": "{decision_ar}",
   "reason_code": "{reason_code}",
   "recommendation_en": "<one or two sentences explaining the decision in English>",
-  "recommendation_ar": "<one or two sentences explaining the decision in Arabic>"
-  {reviewer_note_instruction}
+  "recommendation_ar": "<one or two sentences explaining the decision in Arabic>"{reviewer_note_instruction}
 }}
 
 Rules:
