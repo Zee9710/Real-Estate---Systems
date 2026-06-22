@@ -1,0 +1,33 @@
+sheets:
+  spreadsheet_id: "YOUR_SPREADSHEET_ID_HERE"
+  credentials_path: "credentials/google-service-account.json"
+  historical_tab: "Historical_Cases"
+  incoming_tab: "Incoming_Cases"
+  rules_tab: "Acceptance_Rules"
+
+poller:
+  interval_seconds: 45
+
+ollama:
+  base_url: "http://localhost:11434"
+  model: "qwen3:8b"
+  timeout_seconds: 120
+
+embeddings:
+  model: "BAAI/bge-m3"
+  device: "cpu"  # set to "cuda" if GPU available
+
+chroma:
+  persist_directory: "chroma_db"
+  collection_prefix: "historical_cases"
+
+novelty:
+  k_neighbours: 5
+  # Percentile of the historical self-distance distribution used as flag threshold.
+  # Lower = more sensitive (more flags). Start at 95, tune after first pilot run.
+  threshold_percentile: 95
+
+rules:
+  # How old a registration_date can be (years) before triggering EXPIRED_REGISTRATION.
+  # Confirm this is a real domain rule before tightening.
+  max_registration_age_years: 10

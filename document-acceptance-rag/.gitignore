@@ -1,0 +1,12 @@
+credentials/
+*.json
+!credentials/.gitkeep
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+venv/
+chroma_db/
+# data/*.csv  — synthetic seed CSV is tracked; exclude real case exports if needed
+*.log
