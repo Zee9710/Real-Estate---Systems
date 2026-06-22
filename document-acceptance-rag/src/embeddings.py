@@ -1,14 +1,14 @@
 """
-bge-m3 multilingual embedding service.
+Ollama-based embedding service.
 
+Uses nomic-embed-text via Ollama — no HuggingFace download needed.
 Embeds case ATTRIBUTES ONLY — never decision or reason_code.
 """
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import List
 
-from sentence_transformers import SentenceTransformer
+import httpx
 
 ATTRIBUTE_FIELDS = [
     "document_type",
@@ -24,7 +24,6 @@ ATTRIBUTE_FIELDS = [
 
 
 def case_to_text(case_dict: dict) -> str:
-    """Concatenate attribute fields into a single string for embedding."""
     parts = []
     for field in ATTRIBUTE_FIELDS:
         val = case_dict.get(field, "")
@@ -33,23 +32,22 @@ def case_to_text(case_dict: dict) -> str:
     return " | ".join(parts)
 
 
-@lru_cache(maxsize=1)
-def _load_model(model_name: str, device: str) -> SentenceTransformer:
-    return SentenceTransformer(model_name, device=device)
-
-
 class EmbeddingService:
-    def __init__(self, model_name: str = "BAAI/bge-m3", device: str = "cpu"):
+    def __init__(self, model_name: str = "nomic-embed-text", base_url: str = "http://localhost:11434", **kwargs):
         self.model_name = model_name
-        self.device = device
-
-    @property
-    def model(self) -> SentenceTransformer:
-        return _load_model(self.model_name, self.device)
+        self.base_url = base_url.rstrip("/")
 
     def embed(self, texts: List[str]) -> List[List[float]]:
-        embeddings = self.model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
-        return embeddings.tolist()
+        embeddings = []
+        for text in texts:
+            response = httpx.post(
+                f"{self.base_url}/api/embeddings",
+                json={"model": self.model_name, "prompt": text},
+                timeout=30,
+            )
+            response.raise_for_status()
+            embeddings.append(response.json()["embedding"])
+        return embeddings
 
     def embed_case(self, case_dict: dict) -> List[float]:
         text = case_to_text(case_dict)

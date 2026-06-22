@@ -10,8 +10,8 @@ ollama:
   timeout_seconds: 120
 
 embeddings:
-  model: "BAAI/bge-m3"
-  device: "cpu"  # set to "cuda" if GPU available
+  model: "nomic-embed-text"
+  base_url: "http://localhost:11434"
 
 chroma:
   persist_directory: "chroma_db"
