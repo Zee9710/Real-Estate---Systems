@@ -44,7 +44,7 @@ def main():
 
     embedding_service = EmbeddingService(
         model_name=cfg["embeddings"]["model"],
-        device=cfg["embeddings"]["device"],
+        base_url=cfg["embeddings"]["base_url"],
     )
     vector_store = VectorStore(
         persist_directory=cfg["chroma"]["persist_directory"],

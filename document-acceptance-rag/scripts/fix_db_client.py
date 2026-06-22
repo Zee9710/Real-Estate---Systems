@@ -1,5 +1,14 @@
-"""Overwrites src/db_client.py with the correct content."""
-content = '''"""
+"""
+Overwrites src/db_client.py with the correct content.
+
+Run this if src/db_client.py ever gets corrupted (e.g. by accidentally
+copying a different file over it):
+
+    python scripts/fix_db_client.py
+"""
+import os
+
+CONTENT = '''"""
 SQLite database client — replaces Google Sheets.
 
 Two tables:
@@ -55,6 +64,7 @@ CREATE TABLE IF NOT EXISTS incoming_cases (
     owner_signature    INTEGER,
     liens_present      INTEGER,
     registration_date  TEXT,
+    -- output columns
     decision           TEXT,
     reason_code        TEXT,
     recommendation_en  TEXT,
@@ -90,6 +100,10 @@ class DBClient:
             con.execute(HISTORICAL_DDL)
             con.execute(INCOMING_DDL)
 
+    # ------------------------------------------------------------------
+    # Historical
+    # ------------------------------------------------------------------
+
     def read_historical(self) -> List[Dict[str, Any]]:
         with self._conn() as con:
             rows = con.execute("SELECT * FROM historical_cases").fetchall()
@@ -107,8 +121,13 @@ class DBClient:
             )
 
     def seed_historical(self, rows: List[Dict[str, Any]]):
+        """Bulk insert; skip duplicates."""
         for row in rows:
             self.append_historical(row)
+
+    # ------------------------------------------------------------------
+    # Incoming
+    # ------------------------------------------------------------------
 
     def read_incoming(self) -> List[Dict[str, Any]]:
         with self._conn() as con:
@@ -123,6 +142,7 @@ class DBClient:
         return [dict(r) for r in rows]
 
     def upsert_incoming(self, row: Dict[str, Any]):
+        """Insert or replace a full incoming row."""
         cols = list(row.keys())
         placeholders = ", ".join("?" for _ in cols)
         col_names = ", ".join(cols)
@@ -134,6 +154,7 @@ class DBClient:
             )
 
     def write_recommendation(self, case_id: str, updates: Dict[str, Any]):
+        """Update specific output columns for a case."""
         if not updates:
             return
         set_clause = ", ".join(f"{k} = ?" for k in updates.keys())
@@ -145,18 +166,21 @@ class DBClient:
             )
 
     def get_validated_rows(self) -> List[Dict[str, Any]]:
+        """Rows that a human has validated (validated_by set, needs_review=1, status=done)."""
         with self._conn() as con:
             rows = con.execute(
                 """SELECT * FROM incoming_cases
                    WHERE needs_review = 1
                      AND (validated_by IS NOT NULL AND validated_by != \'\')
                      AND status = \'done\'
-                     AND (source_appended IS NULL OR source_appended = 0)"""
+                     AND (source_appended IS NULL OR source_appended = 0)""",
             ).fetchall()
         return [dict(r) for r in rows]
 
     def mark_appended(self, case_id: str):
+        """Prevent re-appending after growth loop processes a validated row."""
         with self._conn() as con:
+            # Add column if missing (idempotent migration)
             try:
                 con.execute("ALTER TABLE incoming_cases ADD COLUMN source_appended INTEGER DEFAULT 0")
             except Exception:
@@ -167,7 +191,10 @@ class DBClient:
             )
 '''
 
-with open("src/db_client.py", "w", encoding="utf-8") as f:
-    f.write(content)
+target = os.path.join(os.path.dirname(__file__), "..", "src", "db_client.py")
+target = os.path.normpath(target)
 
-print("src/db_client.py fixed successfully.")
+with open(target, "w", encoding="utf-8") as f:
+    f.write(CONTENT)
+
+print(f"src/db_client.py fixed successfully → {target}")
