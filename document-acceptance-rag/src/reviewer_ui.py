@@ -3,9 +3,19 @@ Document Acceptance — Reviewer Console (Streamlit).
 
 Run with:  streamlit run src/reviewer_ui.py
 
-Design approach: native Streamlit theming (.streamlit/config.toml) plus native
-bordered containers, st.metric and st.column_config. CSS injection is limited to
-the few things Streamlit cannot express natively (RTL Arabic, inline badges).
+Architecture (pragmatic hybrid):
+  • Browsing/reads come straight from the SQLite DB via DBClient, so every
+    page works even if the FastAPI service is momentarily down.
+  • Compute actions (process a case, reindex) go through the FastAPI service.
+  • Review / override / growth decisions are written to incoming_cases via
+    DBClient. The few extra reviewer columns are added with an idempotent,
+    UI-side migration so we never have to touch db_client.py.
+
+Charts use plotly when available and fall back to altair, then to native
+Streamlit charts — so a missing plotly install can never crash the page.
+
+The console is bilingual: Arabic is the primary operator language, with
+English in parentheses. Arabic free-text (explanations) is rendered RTL.
 """
 from __future__ import annotations
 
@@ -19,6 +29,14 @@ import streamlit as st
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import yaml
+
+# --- optional chart backends (graceful degradation) ----------------
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    _HAS_PLOTLY = True
+except Exception:
+    _HAS_PLOTLY = False
 
 try:
     import altair as alt
@@ -35,54 +53,79 @@ except Exception:
 from src.db_client import DBClient
 
 # ------------------------------------------------------------------
-# Config + clients
+# Config
 # ------------------------------------------------------------------
 CONFIG_PATH = os.environ.get("CONFIG_PATH", "config.yaml")
 with open(CONFIG_PATH) as f:
     cfg = yaml.safe_load(f)
 
+# Frontend-specific config (optional file).
+FE_CFG = {"backend_url": "http://localhost:8000",
+          "display": {"neighbours_k": 5, "flag_rate_high": 0.80, "flag_rate_low": 0.05}}
+if os.path.exists("frontend_config.yaml"):
+    with open("frontend_config.yaml") as f:
+        loaded = yaml.safe_load(f) or {}
+        FE_CFG.update(loaded)
+
+API_BASE = os.environ.get("BACKEND_URL", FE_CFG.get("backend_url", "http://localhost:8000"))
+NEIGHBOURS_K = FE_CFG.get("display", {}).get("neighbours_k", 5)
+FLAG_HIGH = FE_CFG.get("display", {}).get("flag_rate_high", 0.80)
+FLAG_LOW = FE_CFG.get("display", {}).get("flag_rate_low", 0.05)
+
 db = DBClient(cfg["db"]["path"])
-API_BASE = os.environ.get("API_BASE", "http://localhost:8000")
 
-st.set_page_config(
-    page_title="Document Acceptance Console",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="نظام قبول المستندات", layout="wide", initial_sidebar_state="expanded")
 
-# Minimal CSS — only for what native theming can't express.
+# Colours
+NAVY, GREEN, RED, AMBER, GREY = "#1e3a8a", "#16a34a", "#dc2626", "#f59e0b", "#94a3b8"
+PALETTE = ["#1e3a8a", "#16a34a", "#f59e0b", "#dc2626", "#7c3aed", "#0891b2"]
+
+
+# ------------------------------------------------------------------
+# One-time, idempotent schema top-up (kept out of db_client.py on purpose)
+# ------------------------------------------------------------------
+def ensure_reviewer_columns():
+    extra = [
+        ("reviewed", "INTEGER DEFAULT 0"),
+        ("approved_for_growth", "INTEGER"),
+        ("reviewer_notes", "TEXT"),
+        ("override_decision", "TEXT"),
+        ("override_reason", "TEXT"),
+    ]
+    with db._conn() as con:
+        for col, typ in extra:
+            try:
+                con.execute(f"ALTER TABLE incoming_cases ADD COLUMN {col} {typ}")
+            except Exception:
+                pass
+
+
+ensure_reviewer_columns()
+
+# ------------------------------------------------------------------
+# Minimal CSS — only what native theming can't express
+# ------------------------------------------------------------------
 st.markdown(
     """
     <style>
-      .block-container { padding-top: 2.2rem; max-width: 1400px; }
-      .badge {
-        display: inline-block; padding: 3px 12px; border-radius: 6px;
-        font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em;
-        text-transform: uppercase;
-      }
-      .badge-accept  { background: #dcfce7; color: #166534; }
-      .badge-reject  { background: #fee2e2; color: #991b1b; }
-      .badge-pending { background: #e0e7ff; color: #3730a3; }
-      .panel-ar {
-        direction: rtl; text-align: right; background: #f8fafc;
-        border-right: 3px solid #1e3a8a; padding: 12px 16px;
-        border-radius: 8px 0 0 8px; font-size: 1.02rem; line-height: 1.85;
-        color: #1e293b;
-      }
-      .panel-en {
-        background: #f8fafc; border-left: 3px solid #16a34a;
-        padding: 12px 16px; border-radius: 0 8px 8px 0;
-        font-size: 0.95rem; line-height: 1.6; color: #1e293b; margin-bottom: 10px;
-      }
-      .pill {
-        font-family: ui-monospace, monospace; background: #f1f5f9;
-        color: #475569; padding: 2px 8px; border-radius: 5px;
-        font-size: 0.82rem; border: 1px solid #e2e8f0;
-      }
-      .caption-label {
-        font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em;
-        text-transform: uppercase; color: #94a3b8;
-      }
+      .block-container { padding-top: 2rem; max-width: 1450px; }
+      .badge { display:inline-block; padding:3px 12px; border-radius:6px;
+               font-size:0.72rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; }
+      .badge-accept  { background:#dcfce7; color:#166534; }
+      .badge-reject  { background:#fee2e2; color:#991b1b; }
+      .badge-flag    { background:#fef3c7; color:#92400e; }
+      .badge-pending { background:#e2e8f0; color:#475569; }
+      .panel-ar { direction:rtl; text-align:right; background:#f8fafc; border-right:3px solid #1e3a8a;
+                  padding:12px 16px; border-radius:8px 0 0 8px; font-size:1.02rem; line-height:1.85; color:#1e293b; }
+      .panel-en { background:#f8fafc; border-left:3px solid #16a34a; padding:12px 16px;
+                  border-radius:0 8px 8px 0; font-size:0.95rem; line-height:1.6; color:#1e293b; margin-bottom:10px; }
+      .pill { font-family:ui-monospace,monospace; background:#f1f5f9; color:#475569; padding:2px 8px;
+              border-radius:5px; font-size:0.82rem; border:1px solid #e2e8f0; }
+      .kv-key { color:#64748b; font-size:0.82rem; }
+      .kv-key-hot { color:#dc2626; font-weight:700; font-size:0.82rem; }
+      .caption-label { font-size:0.7rem; font-weight:600; letter-spacing:0.08em;
+                       text-transform:uppercase; color:#94a3b8; }
+      .rtl { direction:rtl; text-align:right; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -90,7 +133,54 @@ st.markdown(
 
 
 # ------------------------------------------------------------------
-# Helpers
+# Arabic labels + static rule reference
+# ------------------------------------------------------------------
+FIELD_LABELS = {
+    "case_id": "معرف الحالة (Case ID)",
+    "document_type": "نوع المستند (Document type)",
+    "owner_name": "اسم المالك (Owner name)",
+    "owner_id": "رقم هوية المالك (Owner ID)",
+    "property_id": "رقم العقار (Property ID)",
+    "property_type": "نوع العقار (Property type)",
+    "area_sqm": "المساحة (Area sqm)",
+    "address": "العنوان (Address)",
+    "city": "المدينة (City)",
+    "notarized": "موثق (Notarized)",
+    "owner_signature": "توقيع المالك (Owner signature)",
+    "liens_present": "رهون/قيود (Liens present)",
+    "registration_date": "تاريخ التسجيل (Registration date)",
+}
+ATTR_FIELDS = list(FIELD_LABELS.keys())
+
+# Which attribute a reason_code points at — used to highlight the offending field.
+REASON_TO_FIELD = {
+    "MISSING_OWNER_NAME": "owner_name",
+    "MISSING_PROPERTY_ID": "property_id",
+    "MISSING_OWNER_SIGNATURE": "owner_signature",
+    "NOT_NOTARIZED": "notarized",
+    "LIEN_PRESENT": "liens_present",
+    "INCOMPLETE_ADDRESS": "address",
+    "INVALID_AREA": "area_sqm",
+    "OWNER_ID_MISMATCH": "owner_id",
+    "EXPIRED_REGISTRATION": "registration_date",
+}
+
+RULES = [
+    ("MEETS_CRITERIA", "اجتياز جميع الفحوصات — All checks pass", "Accepted"),
+    ("MISSING_OWNER_NAME", "اسم المالك فارغ — owner_name empty", "Rejected"),
+    ("MISSING_PROPERTY_ID", "رقم العقار فارغ — property_id empty", "Rejected"),
+    ("MISSING_OWNER_SIGNATURE", "توقيع المالك مفقود — owner_signature = false", "Rejected"),
+    ("NOT_NOTARIZED", "غير موثق لصكوك الملكية — not notarized (صك ملكية only)", "Rejected"),
+    ("LIEN_PRESENT", "وجود رهون/قيود — liens_present = true", "Rejected"),
+    ("INCOMPLETE_ADDRESS", "العنوان أو المدينة فارغ — address or city empty", "Rejected"),
+    ("INVALID_AREA", "مساحة غير صالحة — area_sqm missing or ≤ 0", "Rejected"),
+    ("OWNER_ID_MISMATCH", "رقم هوية غير صالح — owner_id wrong format/length", "Rejected"),
+    ("EXPIRED_REGISTRATION", "تسجيل منتهٍ — registration_date too old", "Rejected"),
+]
+
+
+# ------------------------------------------------------------------
+# API + data helpers
 # ------------------------------------------------------------------
 def api_get(path: str):
     if not _HAS_HTTPX:
@@ -105,7 +195,7 @@ def api_get(path: str):
 
 def api_post(path: str):
     if not _HAS_HTTPX:
-        return None, "httpx not installed"
+        return None, "httpx غير مثبت (httpx not installed)"
     try:
         r = httpx.post(f"{API_BASE}{path}", timeout=600)
         r.raise_for_status()
@@ -114,343 +204,475 @@ def api_post(path: str):
         return None, str(e)
 
 
-def badge(decision: str) -> str:
-    d = (decision or "").lower()
-    if d == "accepted":
-        return '<span class="badge badge-accept">Accepted</span>'
-    if d == "rejected":
-        return '<span class="badge badge-reject">Rejected</span>'
-    return '<span class="badge badge-pending">Pending</span>'
-
-
+@st.cache_data(ttl=5)
 def load_incoming() -> pd.DataFrame:
     rows = db.read_incoming()
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
+@st.cache_data(ttl=5)
 def load_historical() -> pd.DataFrame:
     rows = db.read_historical()
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
-def alt_theme(chart):
-    """Apply consistent transparent background + no view border."""
-    return chart.configure_view(strokeWidth=0).configure(background="transparent")
+def refresh():
+    load_incoming.clear()
+    load_historical.clear()
 
 
-ATTR_FIELDS = [
-    "document_type", "owner_name", "owner_id", "property_id",
-    "property_type", "area_sqm", "address", "city",
-    "notarized", "owner_signature", "liens_present", "registration_date",
-]
-
-NAVY = "#1e3a8a"
-GREEN = "#16a34a"
-RED = "#dc2626"
-AMBER = "#f59e0b"
-PALETTE = ["#1e3a8a", "#16a34a", "#f59e0b", "#dc2626", "#7c3aed", "#0891b2"]
+def badge(decision: str) -> str:
+    d = (decision or "").lower()
+    if d == "accepted":
+        return '<span class="badge badge-accept">مقبول · Accepted</span>'
+    if d == "rejected":
+        return '<span class="badge badge-reject">مرفوض · Rejected</span>'
+    return '<span class="badge badge-pending">قيد الانتظار · Pending</span>'
 
 
-# ------------------------------------------------------------------
-# Sidebar
-# ------------------------------------------------------------------
+def get_neighbours(retrieved_ids: str) -> list[dict]:
+    """Look up the stored nearest-neighbour case IDs (nearest first) in the
+    historical set and return their full rows, preserving order."""
+    if not retrieved_ids:
+        return []
+    ids = [x.strip() for x in str(retrieved_ids).split(",") if x.strip()]
+    hist = load_historical()
+    if hist.empty:
+        return []
+    by_id = {r["case_id"]: r for r in hist.to_dict("records")}
+    return [by_id[i] for i in ids if i in by_id]
+
+
+def threshold_bar(distance: float, threshold: float):
+    """Horizontal bar showing where a case's mean distance sits vs the threshold."""
+    if not _HAS_PLOTLY:
+        ratio = min(distance / threshold, 2.0) if threshold else 0
+        st.progress(min(ratio / 2.0, 1.0))
+        st.caption(f"المسافة (distance) {distance:.4f}  ·  العتبة (threshold) {threshold:.4f}")
+        return
+    axis_max = max(distance, threshold) * 1.4 or 1.0
+    color = RED if distance > threshold else GREEN
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=[distance], y=["distance"], orientation="h",
+                         marker_color=color, width=0.5, hoverinfo="x"))
+    fig.add_vline(x=threshold, line_dash="dash", line_color=AMBER, line_width=2,
+                  annotation_text=f"العتبة {threshold:.4f}", annotation_position="top")
+    fig.update_layout(height=110, margin=dict(l=10, r=10, t=30, b=10),
+                      xaxis=dict(range=[0, axis_max], title="المسافة المتوسطة (mean NN distance)"),
+                      yaxis=dict(showticklabels=False), showlegend=False,
+                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+# ----- chart helpers (plotly → altair → native) ---------------------
+def chart_donut(df_counts: pd.DataFrame, name_col: str, val_col: str, color_map=None):
+    if _HAS_PLOTLY:
+        fig = px.pie(df_counts, names=name_col, values=val_col, hole=0.58,
+                     color=name_col, color_discrete_map=color_map,
+                     color_discrete_sequence=PALETTE)
+        fig.update_traces(textposition="outside", textinfo="label+value")
+        fig.update_layout(height=250, margin=dict(l=0, r=0, t=10, b=10),
+                          showlegend=True, paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True)
+    elif _HAS_ALT:
+        ch = alt.Chart(df_counts).mark_arc(innerRadius=55, outerRadius=90).encode(
+            theta=f"{val_col}:Q", color=f"{name_col}:N", tooltip=[name_col, val_col]
+        ).properties(height=250).configure_view(strokeWidth=0).configure(background="transparent")
+        st.altair_chart(ch, use_container_width=True)
+    else:
+        st.bar_chart(df_counts.set_index(name_col))
+
+
+def chart_hbar(df_counts: pd.DataFrame, cat_col: str, val_col: str, color=NAVY):
+    if _HAS_PLOTLY:
+        fig = px.bar(df_counts.sort_values(val_col), x=val_col, y=cat_col, orientation="h")
+        fig.update_traces(marker_color=color)
+        fig.update_layout(height=260, margin=dict(l=0, r=0, t=10, b=10),
+                          xaxis_title="عدد الحالات (cases)", yaxis_title=None,
+                          paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True)
+    elif _HAS_ALT:
+        ch = alt.Chart(df_counts).mark_bar(color=color).encode(
+            x=alt.X(f"{val_col}:Q", title="cases"),
+            y=alt.Y(f"{cat_col}:N", sort="-x", title=None), tooltip=[cat_col, val_col]
+        ).properties(height=260).configure_view(strokeWidth=0).configure(background="transparent")
+        st.altair_chart(ch, use_container_width=True)
+    else:
+        st.bar_chart(df_counts.set_index(cat_col))
+
+
+def chart_hist(series: pd.Series, threshold: float | None, title: str):
+    data = pd.DataFrame({"d": series.dropna().values})
+    if _HAS_PLOTLY:
+        fig = px.histogram(data, x="d", nbins=30)
+        fig.update_traces(marker_color=NAVY, opacity=0.8)
+        if threshold:
+            fig.add_vline(x=threshold, line_dash="dash", line_color=AMBER, line_width=2,
+                          annotation_text=f"العتبة threshold {threshold:.4f}")
+        fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=10),
+                          xaxis_title=title, yaxis_title="عدد الحالات (cases)",
+                          paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True)
+    elif _HAS_ALT:
+        base = alt.Chart(data).mark_bar(color=NAVY, opacity=0.8).encode(
+            x=alt.X("d:Q", bin=alt.Bin(maxbins=30), title=title), y=alt.Y("count()", title="cases"))
+        if threshold:
+            rule = alt.Chart(pd.DataFrame({"t": [threshold]})).mark_rule(
+                color=AMBER, strokeDash=[5, 4], size=2).encode(x="t:Q")
+            base = base + rule
+        st.altair_chart(base.properties(height=300).configure_view(strokeWidth=0).configure(
+            background="transparent"), use_container_width=True)
+    else:
+        st.bar_chart(data)
+
+
+def render_attributes(case: dict, hot_field: str | None = None):
+    """Key/value attribute list with the rule-triggering field highlighted red."""
+    rows = []
+    for f in ATTR_FIELDS:
+        val = case.get(f)
+        if val in (None, ""):
+            continue
+        if f in ("notarized", "owner_signature", "liens_present"):
+            val = "نعم (Yes)" if str(val) in ("1", "True", "true") else "لا (No)"
+        key_cls = "kv-key-hot" if f == hot_field else "kv-key"
+        flag = " ⚠️" if f == hot_field else ""
+        rows.append(
+            f"<div style='display:flex;justify-content:space-between;padding:4px 0;"
+            f"border-bottom:1px solid #f1f5f9;'>"
+            f"<span class='{key_cls}'>{FIELD_LABELS[f]}{flag}</span>"
+            f"<span style='font-weight:600;color:#1e293b;'>{val}</span></div>"
+        )
+    st.markdown("".join(rows), unsafe_allow_html=True)
+
+
+def render_neighbours(neighbours: list[dict]):
+    """Compact card list of similar historical cases (nearest first)."""
+    if not neighbours:
+        st.caption("لا توجد حالات مشابهة (no neighbours recorded).")
+        return
+    for rank, nb in enumerate(neighbours, 1):
+        with st.container(border=True):
+            c = st.columns([3, 2, 2, 3])
+            c[0].markdown(f"**#{rank} · {nb.get('case_id','')}**")
+            c[1].markdown(badge(nb.get("decision", "")), unsafe_allow_html=True)
+            c[2].markdown(f"<span class='pill'>{nb.get('reason_code','')}</span>", unsafe_allow_html=True)
+            c[3].caption(f"{nb.get('document_type','')} · {nb.get('property_type','')} · {nb.get('city','')}")
+
+
+# ==================================================================
+# Sidebar — navigation + live status + persistent reviewer ID
+# ==================================================================
+health = api_get("/health")
+calib = api_get("/calibration")
+
+if "reviewer_id" not in st.session_state:
+    st.session_state.reviewer_id = ""
+
 with st.sidebar:
     st.markdown(
-        "<div style='padding:10px 0 4px 0;'>"
-        "<div style='font-size:1.1rem;font-weight:700;color:#f8fafc;'>Document Acceptance</div>"
-        "<div style='font-size:0.74rem;color:#64748b;'>Reviewer Console</div></div>",
+        "<div style='padding:8px 0;'><div style='font-size:1.05rem;font-weight:700;color:#f8fafc;'>"
+        "نظام قبول المستندات</div>"
+        "<div style='font-size:0.72rem;color:#64748b;'>Document Acceptance · Reviewer Console</div></div>",
         unsafe_allow_html=True,
     )
     st.divider()
 
     page = st.radio(
-        "Navigation",
-        ["Dashboard", "Review Queue", "Submit Case", "Case Explorer", "Historical"],
+        "التنقل",
+        [
+            "لوحة التحكم (Dashboard)",
+            "المراجعة البشرية (Review Queue)",
+            "إضافة حالة (Submit Case)",
+            "الحالات الواردة (All Incoming)",
+            "المجموعة التاريخية (Historical)",
+            "المعايرة والفهرسة (Calibration)",
+            "قواعد القبول (Rules)",
+        ],
         label_visibility="collapsed",
     )
 
     st.divider()
-    st.markdown("<span class='caption-label'>System Status</span>", unsafe_allow_html=True)
-
-    health = api_get("/health")
+    st.markdown("<span class='caption-label'>حالة النظام · System Status</span>", unsafe_allow_html=True)
     if health:
-        st.markdown(
-            "<span style='color:#22c55e;font-size:0.84rem;font-weight:600;'>● Online</span>",
-            unsafe_allow_html=True,
-        )
-        st.metric("Indexed cases", health.get("chroma_count", "—"))
+        st.markdown("<span style='color:#22c55e;font-weight:600;font-size:0.84rem;'>● متصل (Online)</span>",
+                    unsafe_allow_html=True)
+        st.metric("الحالات المفهرسة (Indexed)", health.get("chroma_count", "—"))
+        st.caption(f"الإصدار (version): {health.get('active_version', '—')}")
     else:
-        st.markdown(
-            "<span style='color:#ef4444;font-size:0.84rem;font-weight:600;'>● Offline</span>",
-            unsafe_allow_html=True,
-        )
-        st.caption("Start: uvicorn src.main:app")
-
-    calib = api_get("/calibration")
+        st.markdown("<span style='color:#ef4444;font-weight:600;font-size:0.84rem;'>● غير متصل (Offline)</span>",
+                    unsafe_allow_html=True)
     if calib and "threshold" in calib:
-        st.metric("Novelty threshold", f"{calib['threshold']:.4f}")
+        st.metric("عتبة التجدد (Novelty threshold)", f"{calib['threshold']:.4f}")
 
     st.divider()
-    if st.button("Reindex & Recalibrate", use_container_width=True):
-        with st.spinner("Rebuilding index…"):
-            _, err = api_post("/reindex")
-        st.error(f"Failed: {err}") if err else st.success("Reindex complete.")
-    if st.button("Process Pending Now", use_container_width=True):
-        with st.spinner("Processing…"):
-            res, err = api_post("/process")
-        st.error(f"Failed: {err}") if err else st.success(
-            f"Processed {res.get('processed', 0) if res else 0} case(s)."
-        )
+    st.session_state.reviewer_id = st.text_input(
+        "معرّف المراجع (Reviewer ID)", value=st.session_state.reviewer_id, placeholder="EMP-042"
+    )
+    if st.button("🔄 تحديث البيانات (Refresh)", use_container_width=True):
+        refresh()
+        st.rerun()
+
+# Persistent banner if the explanation backend is unreachable.
+if not health:
+    st.warning("⚠️ نظام التفسير غير متاح حالياً — Explanation/processing backend is unreachable. "
+               "Browsing still works; processing and reindex are disabled.")
 
 
 # ==================================================================
-# DASHBOARD
+# PAGE: Dashboard
 # ==================================================================
-if page == "Dashboard":
-    st.subheader("Dashboard")
-    st.caption("Live summary of all incoming cases and processing status")
-
+if page.startswith("لوحة التحكم"):
+    st.subheader("لوحة التحكم (Dashboard)")
     df = load_incoming()
     if df.empty:
-        st.info("No cases processed yet. Use Submit Case or run the seeder.")
+        st.info("لا توجد حالات بعد (no cases yet). أضف حالة من صفحة إضافة حالة.")
     else:
         total = len(df)
         done = int((df["status"] == "done").sum()) if "status" in df else 0
         pending = int((df["status"] == "pending").sum()) if "status" in df else 0
         accepted = int((df["decision"] == "Accepted").sum()) if "decision" in df else 0
-        awaiting = int(
-            ((df["needs_review"] == 1) & (df["validated_by"].isna() | (df["validated_by"] == ""))).sum()
-        ) if "needs_review" in df and "validated_by" in df else 0
+        rejected = int((df["decision"] == "Rejected").sum()) if "decision" in df else 0
+        flagged = int((df["needs_review"] == 1).sum()) if "needs_review" in df else 0
+        flag_rate = (flagged / done) if done else 0.0
 
         m = st.columns(5)
-        m[0].metric("Total Cases", total)
-        m[1].metric("Processed", done)
-        m[2].metric("Pending", pending)
-        m[3].metric("Accepted", accepted)
-        m[4].metric("Awaiting Review", awaiting, delta=None)
+        m[0].metric("الإجمالي (Total)", total)
+        m[1].metric("مقبول (Accepted)", accepted)
+        m[2].metric("مرفوض (Rejected)", rejected)
+        m[3].metric("للمراجعة (Flagged)", flagged)
+        m[4].metric("قيد الانتظار (Pending)", pending)
+
+        if done and (flag_rate > FLAG_HIGH or flag_rate < FLAG_LOW):
+            st.warning(f"⚠️ معدل الترشيح {flag_rate:.0%} (flag rate) خارج النطاق المتوقع — "
+                       f"قد تحتاج المعايرة إلى مراجعة (calibration may need attention).")
 
         st.write("")
         col_a, col_b = st.columns(2)
-
         with col_a:
             with st.container(border=True):
-                st.markdown("**Decision breakdown**")
+                st.markdown("**توزيع القرارات (Decision breakdown)**")
                 if "decision" in df and df["decision"].notna().any():
-                    dc = df["decision"].fillna("Unprocessed").value_counts().reset_index()
+                    dc = df["decision"].fillna("Pending").value_counts().reset_index()
                     dc.columns = ["decision", "count"]
-                    if _HAS_ALT:
-                        cmap = {"Accepted": GREEN, "Rejected": RED, "Unprocessed": "#cbd5e1"}
-                        chart = alt.Chart(dc).mark_arc(innerRadius=55, outerRadius=90).encode(
-                            theta="count:Q",
-                            color=alt.Color("decision:N", scale=alt.Scale(
-                                domain=list(cmap), range=list(cmap.values())),
-                                legend=alt.Legend(orient="right")),
-                            tooltip=["decision:N", "count:Q"],
-                        ).properties(height=230)
-                        st.altair_chart(alt_theme(chart), use_container_width=True)
-                    else:
-                        st.bar_chart(dc.set_index("decision"))
+                    chart_donut(dc, "decision", "count",
+                                color_map={"Accepted": GREEN, "Rejected": RED, "Pending": GREY})
                 else:
-                    st.caption("No decisions yet.")
-
+                    st.caption("لا توجد قرارات بعد.")
         with col_b:
             with st.container(border=True):
-                st.markdown("**Rejection reasons**")
+                st.markdown("**أسباب الرفض (Rejection reasons)**")
                 rej = df[df["decision"] == "Rejected"] if "decision" in df else pd.DataFrame()
                 if not rej.empty and "reason_code" in rej.columns:
                     rc = rej["reason_code"].value_counts().reset_index()
                     rc.columns = ["reason_code", "count"]
-                    if _HAS_ALT:
-                        chart = alt.Chart(rc).mark_bar(
-                            cornerRadiusTopRight=3, cornerRadiusBottomRight=3, color=RED).encode(
-                            x=alt.X("count:Q", title="Cases"),
-                            y=alt.Y("reason_code:N", sort="-x", title=None),
-                            tooltip=["reason_code:N", "count:Q"],
-                        ).properties(height=230)
-                        st.altair_chart(alt_theme(chart), use_container_width=True)
-                    else:
-                        st.bar_chart(rc.set_index("reason_code"))
+                    chart_hbar(rc, "reason_code", "count", color=RED)
                 else:
-                    st.caption("No rejections yet.")
+                    st.caption("لا يوجد رفض بعد.")
 
         st.write("")
         with st.container(border=True):
-            st.markdown("**Novelty distance distribution**")
-            if "nn_distance" in df and df["nn_distance"].notna().any():
-                nd = df[["nn_distance"]].dropna()
-                thr = calib.get("threshold") if calib else None
-                if _HAS_ALT:
-                    base = alt.Chart(nd).mark_bar(color=NAVY, opacity=0.8).encode(
-                        x=alt.X("nn_distance:Q", bin=alt.Bin(maxbins=30), title="Nearest-neighbour distance"),
-                        y=alt.Y("count()", title="Cases"),
-                    )
-                    layers = base
-                    if thr:
-                        rule = alt.Chart(pd.DataFrame({"t": [thr]})).mark_rule(
-                            color=AMBER, strokeDash=[5, 4], size=2).encode(x="t:Q")
-                        layers = base + rule
-                    st.altair_chart(alt_theme(layers.properties(height=190)), use_container_width=True)
-                    if thr:
-                        st.caption(f"Amber line marks the novelty threshold ({thr:.4f}); cases to the right are flagged.")
-                else:
-                    st.bar_chart(nd)
-            else:
-                st.caption("No novelty scores yet.")
+            st.markdown("**آخر النشاطات (Recent activity)**")
+            recent_cols = [c for c in ["case_id", "decision", "flag_reason", "processed_at"] if c in df.columns]
+            recent = df.sort_values("processed_at", ascending=False, na_position="last").head(10)
+            st.dataframe(recent[recent_cols], hide_index=True, use_container_width=True)
 
 
 # ==================================================================
-# REVIEW QUEUE
+# PAGE: Review Queue
 # ==================================================================
-elif page == "Review Queue":
-    st.subheader("Review Queue")
-    st.caption("Cases flagged for human validation by the rule engine or novelty detector")
-
+elif page.startswith("المراجعة"):
+    st.subheader("المراجعة البشرية (Human Review Queue)")
     df = load_incoming()
     rows = df.to_dict("records") if not df.empty else []
-    flagged = [r for r in rows if r.get("needs_review") == 1 and not r.get("validated_by")]
+    queue = [r for r in rows if r.get("needs_review") == 1 and not r.get("reviewed")]
 
-    if not flagged:
-        st.success("No cases pending review.")
-    else:
-        st.caption(f"{len(flagged)} case(s) awaiting validation")
-        for case in flagged:
-            with st.container(border=True):
-                head = st.columns([3, 1])
-                head[0].markdown(f"**{case['case_id']}**")
-                head[1].markdown(badge(case.get("decision", "")), unsafe_allow_html=True)
+    # Filter bar
+    f1, f2 = st.columns(2)
+    flag_opts = ["الكل (all)", "no_rule_fired", "novel_pattern"]
+    flag_sel = f1.selectbox("سبب الترشيح (Flag reason)", flag_opts)
+    doc_types = sorted({r.get("document_type", "") for r in queue if r.get("document_type")})
+    doc_sel = f2.multiselect("نوع المستند (Document type)", doc_types, default=doc_types)
 
-                col1, col2 = st.columns([1, 1])
-                with col1:
-                    st.markdown("<span class='caption-label'>Case attributes</span>", unsafe_allow_html=True)
-                    attrs = {f: case.get(f) for f in ATTR_FIELDS if case.get(f) not in (None, "")}
-                    st.dataframe(
-                        pd.DataFrame(list(attrs.items()), columns=["Field", "Value"]),
-                        hide_index=True, use_container_width=True,
-                    )
-                with col2:
-                    st.markdown("<span class='caption-label'>Decision context</span>", unsafe_allow_html=True)
-                    st.markdown(
-                        f"Reason &nbsp;<span class='pill'>{case.get('reason_code','')}</span> "
-                        f"&nbsp; Flag &nbsp;<span class='pill'>{case.get('flag_reason','')}</span>",
-                        unsafe_allow_html=True,
-                    )
-                    nn = case.get("nn_distance")
-                    if nn is not None:
-                        st.markdown(f"Distance &nbsp;<span class='pill'>{float(nn):.4f}</span>", unsafe_allow_html=True)
-                    retrieved = case.get("retrieved_case_ids", "")
-                    if retrieved:
-                        st.markdown(f"Nearest &nbsp;<span class='pill'>{retrieved}</span>", unsafe_allow_html=True)
-                    st.write("")
-                    st.markdown(f"<div class='panel-en'>{case.get('recommendation_en','—')}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='panel-ar'>{case.get('recommendation_ar','—')}</div>", unsafe_allow_html=True)
+    if flag_sel != "الكل (all)":
+        queue = [r for r in queue if r.get("flag_reason") == flag_sel]
+    if doc_sel:
+        queue = [r for r in queue if r.get("document_type") in doc_sel]
 
-                rev_col, btn_col = st.columns([2, 1])
-                reviewer_id = rev_col.text_input(
-                    "Reviewer ID", key=f"rev_{case['case_id']}", placeholder="e.g. EMP-042",
-                    label_visibility="collapsed",
+    st.caption(f"{len(queue)} حالة في الانتظار (case(s) awaiting review)")
+
+    if not queue:
+        st.success("لا توجد حالات للمراجعة (no cases pending review).")
+
+    threshold = (calib or {}).get("threshold", 0.0)
+
+    for case in queue:
+        cid = case["case_id"]
+        title = f"{cid} · {case.get('document_type','')} · {case.get('reason_code','')} · flag: {case.get('flag_reason','')}"
+        with st.expander(title, expanded=False):
+            left, right = st.columns([1, 1])
+
+            with left:
+                st.markdown("<span class='caption-label'>سمات الحالة · Case attributes</span>", unsafe_allow_html=True)
+                hot = REASON_TO_FIELD.get(case.get("reason_code", ""))
+                render_attributes(case, hot_field=hot)
+
+            with right:
+                st.markdown("<span class='caption-label'>مخرجات النظام · System output</span>", unsafe_allow_html=True)
+                st.markdown(badge(case.get("decision", "")), unsafe_allow_html=True)
+                st.markdown(
+                    f"<br>السبب (reason) <span class='pill'>{case.get('reason_code','')}</span> "
+                    f"&nbsp; الترشيح (flag) <span class='pill'>{case.get('flag_reason','')}</span>",
+                    unsafe_allow_html=True,
                 )
-                if btn_col.button("Validate", key=f"val_{case['case_id']}", use_container_width=True):
-                    if not reviewer_id.strip():
-                        st.error("Enter your reviewer ID first.")
-                    else:
-                        db.write_recommendation(case["case_id"], {"validated_by": reviewer_id.strip()})
-                        st.success(f"Validated by {reviewer_id}.")
-                        st.rerun()
+                st.markdown(f"<div class='panel-ar'>{case.get('recommendation_ar','—')}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='panel-en'>{case.get('recommendation_en','—')}</div>", unsafe_allow_html=True)
+
+            st.markdown("<span class='caption-label'>الحالات المشابهة · Nearest historical cases</span>",
+                        unsafe_allow_html=True)
+            nn = case.get("nn_distance")
+            if nn is not None and threshold:
+                threshold_bar(float(nn), float(threshold))
+            render_neighbours(get_neighbours(case.get("retrieved_case_ids", "")))
+
+            st.divider()
+            # ---- review actions ----
+            st.markdown("<span class='caption-label'>إجراء المراجعة · Review action</span>", unsafe_allow_html=True)
+            decision_growth = st.radio(
+                "القرار (decision)",
+                ["أوافق على الإدخال للمجموعة (Approve for growth)",
+                 "أرفض الإدخال (Reject from growth)"],
+                key=f"grow_{cid}", horizontal=True, label_visibility="collapsed",
+            )
+            notes = st.text_area("ملاحظات (notes)", key=f"notes_{cid}", placeholder="اختياري · optional")
+
+            with st.expander("تجاوز قرار النظام (Override decision)"):
+                ov_decision = st.selectbox(
+                    "القرار الجديد (new decision)", ["— لا تجاوز (no override) —", "Accepted", "Rejected"],
+                    key=f"ovd_{cid}",
+                )
+                ov_reason = st.text_input("سبب التجاوز (override reason)", key=f"ovr_{cid}")
+
+            if st.button("✔ اعتماد المراجعة (Submit review)", key=f"submit_{cid}", use_container_width=True):
+                reviewer = st.session_state.reviewer_id.strip()
+                if not reviewer:
+                    st.error("أدخل معرّف المراجع في الشريط الجانبي (enter reviewer ID in the sidebar).")
+                elif ov_decision != "— لا تجاوز (no override) —" and not ov_reason.strip():
+                    st.error("سبب التجاوز مطلوب (override reason is required).")
+                else:
+                    approve = decision_growth.startswith("أوافق")
+                    updates = {
+                        "reviewed": 1,
+                        "approved_for_growth": 1 if approve else 0,
+                        "reviewer_notes": notes.strip(),
+                        "status": "done",
+                    }
+                    # growth loop only appends rows that have validated_by set
+                    if approve:
+                        updates["validated_by"] = reviewer
+                    if ov_decision != "— لا تجاوز (no override) —":
+                        updates["decision"] = ov_decision
+                        updates["override_decision"] = ov_decision
+                        updates["override_reason"] = ov_reason.strip()
+                    db.write_recommendation(cid, updates)
+                    refresh()
+                    st.success(f"تم اعتماد {cid} بواسطة {reviewer} (review saved).")
+                    st.rerun()
 
 
 # ==================================================================
-# SUBMIT CASE
+# PAGE: Submit Case  (with 5 most-similar historical cases)
 # ==================================================================
-elif page == "Submit Case":
-    st.subheader("Submit Case")
-    st.caption("Insert a new case into the processing queue")
+elif page.startswith("إضافة"):
+    st.subheader("إضافة حالة (Submit Case)")
+    st.caption("أدخل حالة جديدة وستظهر أقرب الحالات التاريخية المشابهة بعد المعالجة "
+               "(insert a case; the nearest historical cases appear after processing).")
 
     with st.form("new_case"):
         c1, c2, c3 = st.columns(3)
         with c1:
-            case_id = st.text_input("Case ID *", placeholder="CASE-1001")
-            document_type = st.text_input("Document type", value="عقد بيع")
-            owner_name = st.text_input("Owner name")
-            owner_id = st.text_input("Owner national ID (10 digits)")
+            case_id = st.text_input(FIELD_LABELS["case_id"] + " *", placeholder="CASE-1001")
+            document_type = st.selectbox(FIELD_LABELS["document_type"], ["صك ملكية", "عقد إيجار", "توكيل", "عقد بيع"])
+            owner_name = st.text_input(FIELD_LABELS["owner_name"])
+            owner_id = st.text_input(FIELD_LABELS["owner_id"], placeholder="10 أرقام")
         with c2:
-            property_id = st.text_input("Property ID")
-            property_type = st.text_input("Property type", value="apartment")
-            area_sqm = st.number_input("Area (sqm)", min_value=0.0, value=100.0, step=10.0)
-            registration_date = st.date_input("Registration date", value=date(2022, 1, 1))
+            property_id = st.text_input(FIELD_LABELS["property_id"])
+            property_type = st.selectbox(FIELD_LABELS["property_type"], ["شقة", "فيلا", "أرض", "apartment"])
+            area_sqm = st.number_input(FIELD_LABELS["area_sqm"], min_value=0.0, value=100.0, step=10.0)
+            registration_date = st.date_input(FIELD_LABELS["registration_date"], value=date(2022, 1, 1))
         with c3:
-            address = st.text_input("Address")
-            city = st.text_input("City", value="Riyadh")
-            notarized = st.checkbox("Notarized", value=True)
-            owner_signature = st.checkbox("Owner signature present", value=True)
-            liens_present = st.checkbox("Liens present", value=False)
-
-        process_now = st.checkbox("Process immediately after insert", value=True)
-        submitted = st.form_submit_button("Submit Case", use_container_width=True)
+            address = st.text_input(FIELD_LABELS["address"])
+            city = st.text_input(FIELD_LABELS["city"], value="Riyadh")
+            notarized = st.checkbox(FIELD_LABELS["notarized"], value=True)
+            owner_signature = st.checkbox(FIELD_LABELS["owner_signature"], value=True)
+            liens_present = st.checkbox(FIELD_LABELS["liens_present"], value=False)
+        submitted = st.form_submit_button("إضافة ومعالجة (Insert & process)", use_container_width=True)
 
     if submitted:
         if not case_id.strip():
-            st.error("Case ID is required.")
+            st.error("معرف الحالة مطلوب (Case ID is required).")
+        elif not health:
+            st.error("الخادم غير متصل — لا يمكن المعالجة (backend offline, cannot process).")
         else:
             row = {
-                "case_id": case_id.strip(),
-                "document_type": document_type,
-                "owner_name": owner_name,
-                "owner_id": owner_id,
-                "property_id": property_id,
-                "property_type": property_type,
-                "area_sqm": float(area_sqm),
-                "address": address,
-                "city": city,
-                "notarized": 1 if notarized else 0,
-                "owner_signature": 1 if owner_signature else 0,
+                "case_id": case_id.strip(), "document_type": document_type, "owner_name": owner_name,
+                "owner_id": owner_id, "property_id": property_id, "property_type": property_type,
+                "area_sqm": float(area_sqm), "address": address, "city": city,
+                "notarized": 1 if notarized else 0, "owner_signature": 1 if owner_signature else 0,
                 "liens_present": 1 if liens_present else 0,
-                "registration_date": registration_date.isoformat(),
-                "status": "pending",
+                "registration_date": registration_date.isoformat(), "status": "pending",
             }
             db.upsert_incoming(row)
-            st.success(f"Case {case_id} inserted.")
-            if process_now:
-                with st.spinner("Running rule engine, novelty detection and explanation…"):
-                    res, err = api_post(f"/process?case_id={case_id.strip()}")
-                if err:
-                    st.warning(f"Inserted, but processing failed: {err}")
-                elif res and res.get("results"):
-                    out = res["results"][0]
-                    with st.container(border=True):
-                        st.markdown(badge(out.get("decision", "")), unsafe_allow_html=True)
-                        st.markdown(f"<br>Reason &nbsp;<span class='pill'>{out.get('reason_code','')}</span>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='panel-en'>{out.get('recommendation_en','—')}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='panel-ar'>{out.get('recommendation_ar','—')}</div>", unsafe_allow_html=True)
-                        if out.get("needs_review"):
-                            st.info("Case flagged and added to the Review Queue.")
-                else:
-                    st.info("Case processed. Check the Case Explorer.")
+            with st.spinner("المعالجة عبر محرك القواعد وكاشف التجدد… (processing)…"):
+                res, err = api_post(f"/process?case_id={case_id.strip()}")
+            refresh()
+            if err:
+                st.warning(f"تمت الإضافة، لكن فشلت المعالجة (inserted but processing failed): {err}")
+            elif res and res.get("results"):
+                out = res["results"][0]
+                st.markdown(badge(out.get("decision", "")), unsafe_allow_html=True)
+                st.markdown(f"<br>السبب (reason) <span class='pill'>{out.get('reason_code','')}</span>",
+                            unsafe_allow_html=True)
+                st.markdown(f"<div class='panel-ar'>{out.get('recommendation_ar','—')}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='panel-en'>{out.get('recommendation_en','—')}</div>", unsafe_allow_html=True)
+
+                st.divider()
+                st.markdown(f"#### أقرب {NEIGHBOURS_K} حالات تاريخية مشابهة (Top {NEIGHBOURS_K} similar historical cases)")
+                threshold = (calib or {}).get("threshold", 0.0)
+                nn = out.get("nn_distance")
+                if nn is not None and threshold:
+                    threshold_bar(float(nn), float(threshold))
+                render_neighbours(get_neighbours(out.get("retrieved_case_ids", "")))
+                if out.get("needs_review"):
+                    st.info("⚠️ تم ترشيح هذه الحالة وأضيفت إلى قائمة المراجعة (flagged → Review Queue).")
 
 
 # ==================================================================
-# CASE EXPLORER
+# PAGE: All Incoming
 # ==================================================================
-elif page == "Case Explorer":
-    st.subheader("Case Explorer")
-    st.caption("Search, filter and export incoming cases")
-
+elif page.startswith("الحالات الواردة"):
+    st.subheader("الحالات الواردة (All Incoming Cases)")
     df = load_incoming()
     if df.empty:
-        st.info("No incoming cases yet.")
+        st.info("لا توجد حالات واردة (no incoming cases).")
     else:
-        f1, f2, f3 = st.columns(3)
+        f = st.columns(4)
         statuses = df["status"].dropna().unique().tolist() if "status" in df else []
         decisions = df["decision"].dropna().unique().tolist() if "decision" in df else []
-        status_filter = f1.multiselect("Status", statuses, default=statuses)
-        decision_filter = f2.multiselect("Decision", decisions, default=decisions)
-        search = f3.text_input("Search case ID or owner name")
+        doc_types = df["document_type"].dropna().unique().tolist() if "document_type" in df else []
+        s_sel = f[0].multiselect("الحالة (status)", statuses, default=statuses)
+        d_sel = f[1].multiselect("القرار (decision)", decisions, default=decisions)
+        t_sel = f[2].multiselect("نوع المستند (document type)", doc_types, default=doc_types)
+        search = f[3].text_input("بحث (search ID/owner)")
 
         view = df.copy()
-        if status_filter and "status" in view:
-            view = view[view["status"].isin(status_filter)]
-        if decision_filter and "decision" in view:
-            view = view[view["decision"].isin(decision_filter)]
-        if st.checkbox("Show flagged cases only") and "needs_review" in view:
+        if s_sel and "status" in view:
+            view = view[view["status"].isin(s_sel)]
+        if d_sel and "decision" in view:
+            view = view[view["decision"].isin(d_sel)]
+        if t_sel and "document_type" in view:
+            view = view[view["document_type"].isin(t_sel)]
+        if st.checkbox("المرشحة فقط (flagged only)") and "needs_review" in view:
             view = view[view["needs_review"] == 1]
         if search:
             mask = pd.Series(False, index=view.index)
@@ -459,90 +681,130 @@ elif page == "Case Explorer":
                     mask = mask | view[col].astype(str).str.contains(search, case=False, na=False)
             view = view[mask]
 
-        st.caption(f"{len(view)} case(s) shown")
-        display_cols = [
-            "case_id", "status", "decision", "reason_code", "flag_reason",
-            "needs_review", "validated_by", "nn_distance", "processed_at",
-        ]
-        present = [c for c in display_cols if c in view.columns]
+        st.caption(f"{len(view)} حالة (case(s))")
+        cols = ["case_id", "document_type", "owner_name", "decision", "reason_code",
+                "flag_reason", "needs_review", "processed_at", "validated_by"]
+        present = [c for c in cols if c in view.columns]
         st.dataframe(
-            view[present],
-            use_container_width=True,
-            hide_index=True,
+            view[present], hide_index=True, use_container_width=True,
             column_config={
-                "case_id": st.column_config.TextColumn("Case ID"),
-                "decision": st.column_config.TextColumn("Decision"),
-                "reason_code": st.column_config.TextColumn("Reason"),
-                "needs_review": st.column_config.CheckboxColumn("Flagged"),
-                "nn_distance": st.column_config.NumberColumn("NN dist.", format="%.4f"),
-                "processed_at": st.column_config.DatetimeColumn("Processed"),
+                "needs_review": st.column_config.CheckboxColumn("مرشّح (flagged)"),
+                "processed_at": st.column_config.DatetimeColumn("المعالجة (processed)"),
             },
         )
-        st.download_button(
-            "Export as CSV",
-            view.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"incoming_cases_{datetime.now():%Y%m%d}.csv",
-            mime="text/csv",
-        )
+        st.download_button("⬇️ تصدير CSV (export)",
+                           view.to_csv(index=False).encode("utf-8-sig"),
+                           file_name=f"incoming_{datetime.now():%Y%m%d}.csv", mime="text/csv")
 
 
 # ==================================================================
-# HISTORICAL
+# PAGE: Historical
 # ==================================================================
-elif page == "Historical":
-    st.subheader("Historical Knowledge Base")
-    st.caption("Validated cases used for embedding retrieval and novelty calibration")
-
+elif page.startswith("المجموعة"):
+    st.subheader("المجموعة التاريخية (Historical Cases)")
     df = load_historical()
     if df.empty:
-        st.info("No historical cases yet. Run scripts/seed_db.py.")
+        st.info("لا توجد حالات تاريخية (no historical cases). Run scripts/seed_db.py.")
     else:
         m = st.columns(3)
-        m[0].metric("Total Cases", len(df))
+        m[0].metric("الإجمالي (Total)", len(df))
+        m[1].metric("الإصدار (Index version)", (health or {}).get("active_version", "—"))
         if "decision" in df:
-            m[1].metric("Accepted", int((df["decision"] == "Accepted").sum()))
-            m[2].metric("Rejected", int((df["decision"] == "Rejected").sum()))
+            m[2].metric("مقبول (Accepted)", int((df["decision"] == "Accepted").sum()))
 
         st.write("")
         col_a, col_b = st.columns(2)
         with col_a:
             with st.container(border=True):
-                st.markdown("**Cases by city**")
+                st.markdown("**حسب المدينة (by city)**")
                 if "city" in df and df["city"].notna().any():
                     cc = df["city"].value_counts().head(12).reset_index()
                     cc.columns = ["city", "count"]
-                    if _HAS_ALT:
-                        chart = alt.Chart(cc).mark_bar(
-                            cornerRadiusTopRight=3, cornerRadiusBottomRight=3, color=NAVY).encode(
-                            x=alt.X("count:Q", title="Cases"),
-                            y=alt.Y("city:N", sort="-x", title=None),
-                            tooltip=["city:N", "count:Q"],
-                        ).properties(height=270)
-                        st.altair_chart(alt_theme(chart), use_container_width=True)
-                    else:
-                        st.bar_chart(cc.set_index("city"))
+                    chart_hbar(cc, "city", "count")
         with col_b:
             with st.container(border=True):
-                st.markdown("**Cases by property type**")
+                st.markdown("**حسب نوع العقار (by property type)**")
                 if "property_type" in df and df["property_type"].notna().any():
                     pc = df["property_type"].value_counts().reset_index()
                     pc.columns = ["property_type", "count"]
-                    if _HAS_ALT:
-                        chart = alt.Chart(pc).mark_arc(innerRadius=55, outerRadius=90).encode(
-                            theta="count:Q",
-                            color=alt.Color("property_type:N", scale=alt.Scale(range=PALETTE),
-                                            legend=alt.Legend(orient="right")),
-                            tooltip=["property_type:N", "count:Q"],
-                        ).properties(height=270)
-                        st.altair_chart(alt_theme(chart), use_container_width=True)
-                    else:
-                        st.bar_chart(pc.set_index("property_type"))
+                    chart_donut(pc, "property_type", "count")
 
         st.write("")
-        if "decision" in df:
-            decisions = df["decision"].dropna().unique().tolist()
-            dfilter = st.multiselect("Filter by decision", decisions, default=decisions)
-            view = df[df["decision"].isin(dfilter)] if dfilter else df
+        f = st.columns(3)
+        doc_types = df["document_type"].dropna().unique().tolist() if "document_type" in df else []
+        cities = df["city"].dropna().unique().tolist() if "city" in df else []
+        decisions = df["decision"].dropna().unique().tolist() if "decision" in df else []
+        t_sel = f[0].multiselect("نوع المستند (document type)", doc_types, default=doc_types)
+        c_sel = f[1].multiselect("المدينة (city)", cities, default=cities)
+        d_sel = f[2].multiselect("القرار (decision)", decisions, default=decisions)
+
+        view = df.copy()
+        if t_sel and "document_type" in view:
+            view = view[view["document_type"].isin(t_sel)]
+        if c_sel and "city" in view:
+            view = view[view["city"].isin(c_sel)]
+        if d_sel and "decision" in view:
+            view = view[view["decision"].isin(d_sel)]
+
+        st.caption(f"{len(view)} حالة (case(s)) — للعرض فقط (read-only)")
+        st.dataframe(view, hide_index=True, use_container_width=True)
+
+
+# ==================================================================
+# PAGE: Calibration & Indexing
+# ==================================================================
+elif page.startswith("المعايرة"):
+    st.subheader("المعايرة والفهرسة (Calibration & Indexing)")
+    df = load_incoming()
+
+    threshold = (calib or {}).get("threshold")
+    m = st.columns(4)
+    m[0].metric("عتبة التجدد (Threshold)", f"{threshold:.4f}" if threshold else "—")
+    m[1].metric("المئين (Percentile)", (calib or {}).get("percentile", cfg["novelty"]["threshold_percentile"]))
+    if not df.empty and "needs_review" in df and "status" in df:
+        done = int((df["status"] == "done").sum())
+        flagged = int((df["needs_review"] == 1).sum())
+        m[2].metric("معدل الترشيح (Flag rate)", f"{(flagged/done):.0%}" if done else "—")
+        m[3].metric("معالجة (Processed)", done)
+
+    st.write("")
+    with st.container(border=True):
+        st.markdown("**توزيع مسافات التجدد (Novelty distance distribution)**")
+        if not df.empty and "nn_distance" in df and df["nn_distance"].notna().any():
+            chart_hist(df["nn_distance"], threshold, "المسافة المتوسطة (mean NN distance)")
+            st.caption("الخط البرتقالي = العتبة؛ الحالات على يمينه تُرشَّح كحالات متجددة "
+                       "(amber line = threshold; cases to its right are flagged as novel).")
         else:
-            view = df
-        st.dataframe(view, use_container_width=True, hide_index=True)
+            st.caption("لا توجد بيانات مسافات بعد (no distance data yet). عالِج بعض الحالات أولاً.")
+
+    st.write("")
+    with st.container(border=True):
+        st.markdown("**إعادة الفهرسة (Reindex)**")
+        st.caption("الإعادة التلقائية تحدث فقط عند إضافة حالات جديدة عبر صفحة المراجعة "
+                   "(auto-reindex only happens when validated cases are added).")
+        confirm = st.checkbox("أؤكد رغبتي في إعادة الفهرسة الآن (confirm reindex)")
+        if st.button("إعادة فهرسة الآن (Reindex now)", disabled=not confirm, use_container_width=True):
+            with st.spinner("إعادة بناء الفهرس… (rebuilding index)…"):
+                res, err = api_post("/reindex")
+            if err:
+                st.error(f"فشلت الإعادة (reindex failed): {err}")
+            else:
+                st.success(f"اكتملت الإعادة (reindex complete). الإصدار: {res.get('version','—')}")
+                st.json(res)
+
+
+# ==================================================================
+# PAGE: Rules reference
+# ==================================================================
+elif page.startswith("قواعد"):
+    st.subheader("قواعد القبول (Acceptance Rules)")
+    st.info("هذه القواعد هي المرجع الوحيد للقرار — لا يمكن للذكاء الاصطناعي تجاوزها. "
+            "These 10 deterministic rules are authoritative; the LLM only explains, it never decides.")
+    rules_df = pd.DataFrame(RULES, columns=["reason_code", "القاعدة (Rule)", "القرار (Decision)"])
+    st.dataframe(
+        rules_df, hide_index=True, use_container_width=True,
+        column_config={
+            "reason_code": st.column_config.TextColumn("رمز السبب (Reason code)"),
+            "القرار (Decision)": st.column_config.TextColumn("القرار (Decision)"),
+        },
+    )

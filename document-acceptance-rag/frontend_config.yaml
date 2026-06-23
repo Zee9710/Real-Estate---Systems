@@ -1,0 +1,11 @@
+# Frontend display configuration for the Document Acceptance reviewer console.
+# The backend URL can also be overridden with the BACKEND_URL environment variable.
+
+backend_url: "http://localhost:8000"
+
+display:
+  # How many nearest historical neighbours to show on the Submit / detail views.
+  neighbours_k: 5
+  # Flag-rate thresholds that trigger the calibration warning banner.
+  flag_rate_high: 0.80
+  flag_rate_low: 0.05
