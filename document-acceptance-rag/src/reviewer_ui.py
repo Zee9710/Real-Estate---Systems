@@ -182,11 +182,9 @@ st.markdown(
         font-family: 'Scheherazade New', 'Amiri', 'Noto Naskh Arabic', serif;
         font-size: clamp(2.2rem, 5vw, 3.4rem);
         line-height: 1.55;
-        background: linear-gradient(135deg, #064e3b 0%, #059669 50%, #34d399 100%);
-        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        color: #ffffff;
         padding: 10px 0 6px;
         letter-spacing: 0.02em;
-        text-shadow: none;
       }
       .arabic-sub {
         text-align: center;
