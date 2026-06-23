@@ -183,8 +183,10 @@ st.markdown(
         font-size: clamp(2.2rem, 5vw, 3.4rem);
         line-height: 1.55;
         color: #ffffff;
+        font-weight: 700;
         padding: 10px 0 6px;
         letter-spacing: 0.02em;
+        text-shadow: 0 2px 12px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.55);
       }
       .arabic-sub {
         text-align: center;
@@ -541,9 +543,9 @@ if page == "Dashboard":
     # ---- Arabic calligraphy brand block ----
     st.markdown(
         """
-        <div style='background:linear-gradient(110deg,#065f46 0%,#059669 55%,#10b981 100%);
+        <div style='background:linear-gradient(110deg,#022c22 0%,#065f46 45%,#047857 100%);
                     border-radius:20px;padding:32px 28px 24px;margin-bottom:28px;
-                    box-shadow:0 12px 36px -12px rgba(5,150,105,0.55);text-align:center;'>
+                    box-shadow:0 12px 36px -12px rgba(2,44,34,0.65);text-align:center;'>
           <div class='arabic-calli'>نِظَامُ قَبُولِ الْمُسْتَنَدَاتِ الْعَقَارِيَّة</div>
           <hr class='landing-divider'/>
           <div class='arabic-sub'>Document Acceptance System &nbsp;·&nbsp; Reviewer Console</div>
