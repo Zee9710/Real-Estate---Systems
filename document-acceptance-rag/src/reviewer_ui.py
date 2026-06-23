@@ -180,13 +180,16 @@ st.markdown(
       .arabic-calli {
         text-align: center; direction: rtl;
         font-family: 'Scheherazade New', 'Amiri', 'Noto Naskh Arabic', serif;
-        font-size: clamp(2.2rem, 5vw, 3.4rem);
+        font-size: clamp(2.4rem, 5vw, 3.6rem);
         line-height: 1.55;
         color: #ffffff;
         font-weight: 700;
-        padding: 10px 0 6px;
+        padding: 14px 20px 10px;
         letter-spacing: 0.02em;
-        text-shadow: 0 2px 12px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.55);
+        background: rgba(0,0,0,0.28);
+        border-radius: 12px;
+        display: inline-block;
+        text-shadow: 0 2px 8px rgba(0,0,0,0.6);
       }
       .arabic-sub {
         text-align: center;
