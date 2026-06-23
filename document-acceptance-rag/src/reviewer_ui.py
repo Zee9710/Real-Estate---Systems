@@ -76,9 +76,9 @@ db = DBClient(cfg["db"]["path"])
 
 st.set_page_config(page_title="نظام قبول المستندات", layout="wide", initial_sidebar_state="expanded")
 
-# Colours — vivid but professional indigo/teal family
-NAVY, GREEN, RED, AMBER, GREY = "#4f46e5", "#10b981", "#ef4444", "#f59e0b", "#94a3b8"
-PALETTE = ["#4f46e5", "#0ea5e9", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#14b8a6"]
+# Colours — emerald green brand family (NAVY kept as the name for the primary accent)
+NAVY, GREEN, RED, AMBER, GREY = "#059669", "#10b981", "#ef4444", "#f59e0b", "#94a3b8"
+PALETTE = ["#065f46", "#059669", "#10b981", "#34d399", "#14b8a6", "#6ee7b7", "#0d9488"]
 
 
 # ------------------------------------------------------------------
@@ -112,66 +112,78 @@ st.markdown(
 
       /* ---- Hero header ---- */
       .hero {
-        background: linear-gradient(110deg, #4f46e5 0%, #6366f1 45%, #0ea5e9 100%);
+        background: linear-gradient(110deg, #065f46 0%, #059669 50%, #10b981 100%);
         border-radius: 16px; padding: 20px 26px; margin-bottom: 22px;
-        color: #fff; box-shadow: 0 10px 30px -10px rgba(79,70,229,0.55);
+        color: #fff; box-shadow: 0 10px 30px -10px rgba(5,150,105,0.55);
       }
       .hero h2 { margin: 0; font-size: 1.35rem; font-weight: 700; color: #fff; }
-      .hero p  { margin: 4px 0 0 0; font-size: 0.85rem; color: #e0e7ff; }
+      .hero p  { margin: 4px 0 0 0; font-size: 0.85rem; color: #d1fae5; }
+
+      /* ---- Sidebar: emerald gradient fill ---- */
+      section[data-testid="stSidebar"] > div {
+        background: linear-gradient(180deg, #065f46 0%, #047857 60%, #059669 100%);
+      }
+      section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:hover {
+        background: rgba(255,255,255,0.10); border-radius: 8px;
+      }
+      /* On the emerald sidebar, render gradient labels as solid light text */
+      section[data-testid="stSidebar"] .caption-label {
+        background: none !important; -webkit-text-fill-color: #a7f3d0 !important; color: #a7f3d0 !important;
+      }
 
       /* ---- Metric cards get colour + lift ---- */
       div[data-testid="stMetric"] {
         background: #ffffff;
-        border: 1px solid #e9edf5;
-        border-left: 5px solid #4f46e5;
+        border: 1px solid #d1fae5;
+        border-left: 5px solid #059669;
         border-radius: 12px; padding: 16px 18px;
-        box-shadow: 0 4px 14px -8px rgba(30,41,59,0.25);
+        box-shadow: 0 4px 14px -8px rgba(6,95,70,0.25);
         transition: transform .12s ease, box-shadow .12s ease;
       }
       div[data-testid="stMetric"]:hover {
         transform: translateY(-2px);
-        box-shadow: 0 10px 22px -10px rgba(30,41,59,0.35);
+        box-shadow: 0 10px 22px -10px rgba(6,95,70,0.4);
       }
-      div[data-testid="stMetricValue"] { color:#1e1b4b; font-weight:700; }
-      div[data-testid="stMetricLabel"] p { color:#64748b !important; font-weight:600; }
+      div[data-testid="stMetricValue"] { color:#064e3b; font-weight:700; }
+      div[data-testid="stMetricLabel"] p { color:#059669 !important; font-weight:600; }
 
-      /* Rotate the accent colour of metric cards across a row */
-      div[data-testid="column"]:nth-child(5n+1) div[data-testid="stMetric"] { border-left-color:#4f46e5; }
-      div[data-testid="column"]:nth-child(5n+2) div[data-testid="stMetric"] { border-left-color:#16a34a; }
-      div[data-testid="column"]:nth-child(5n+3) div[data-testid="stMetric"] { border-left-color:#dc2626; }
-      div[data-testid="column"]:nth-child(5n+4) div[data-testid="stMetric"] { border-left-color:#f59e0b; }
-      div[data-testid="column"]:nth-child(5n+5) div[data-testid="stMetric"] { border-left-color:#0ea5e9; }
+      /* Rotate emerald shades of metric cards across a row */
+      div[data-testid="column"]:nth-child(5n+1) div[data-testid="stMetric"] { border-left-color:#065f46; }
+      div[data-testid="column"]:nth-child(5n+2) div[data-testid="stMetric"] { border-left-color:#059669; }
+      div[data-testid="column"]:nth-child(5n+3) div[data-testid="stMetric"] { border-left-color:#10b981; }
+      div[data-testid="column"]:nth-child(5n+4) div[data-testid="stMetric"] { border-left-color:#34d399; }
+      div[data-testid="column"]:nth-child(5n+5) div[data-testid="stMetric"] { border-left-color:#047857; }
 
       /* ---- Bordered containers as soft cards ---- */
       div[data-testid="stVerticalBlockBorderWrapper"] {
         border-radius: 14px !important;
-        box-shadow: 0 2px 10px -6px rgba(30,41,59,0.18);
+        box-shadow: 0 2px 10px -6px rgba(6,95,70,0.18);
       }
 
       /* ---- Badges (richer, pill-shaped) ---- */
       .badge { display:inline-block; padding:4px 14px; border-radius:999px;
                font-size:0.72rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; }
-      .badge-accept  { background:linear-gradient(135deg,#bbf7d0,#86efac); color:#14532d; }
+      .badge-accept  { background:linear-gradient(135deg,#6ee7b7,#34d399); color:#064e3b; }
       .badge-reject  { background:linear-gradient(135deg,#fecaca,#fca5a5); color:#7f1d1d; }
       .badge-flag    { background:linear-gradient(135deg,#fde68a,#fcd34d); color:#78350f; }
       .badge-pending { background:linear-gradient(135deg,#e2e8f0,#cbd5e1); color:#334155; }
 
       /* ---- Explanation panels ---- */
       .panel-ar { direction:rtl; text-align:right;
-                  background:linear-gradient(95deg,#eef2ff,#f8fafc); border-right:4px solid #4f46e5;
-                  padding:13px 17px; border-radius:10px 0 0 10px; font-size:1.02rem; line-height:1.85; color:#1e293b; }
-      .panel-en { background:linear-gradient(265deg,#ecfdf5,#f8fafc); border-left:4px solid #10b981;
+                  background:linear-gradient(95deg,#d1fae5,#f0fdf4); border-right:4px solid #059669;
+                  padding:13px 17px; border-radius:10px 0 0 10px; font-size:1.02rem; line-height:1.85; color:#0f291f; }
+      .panel-en { background:linear-gradient(265deg,#ecfdf5,#f0fdf4); border-left:4px solid #10b981;
                   padding:13px 17px; border-radius:0 10px 10px 0; font-size:0.95rem; line-height:1.6;
-                  color:#1e293b; margin-bottom:10px; }
+                  color:#0f291f; margin-bottom:10px; }
 
       /* ---- Pills / keys ---- */
-      .pill { font-family:ui-monospace,monospace; background:#eef2ff; color:#4338ca; padding:2px 9px;
-              border-radius:6px; font-size:0.82rem; border:1px solid #c7d2fe; }
-      .kv-key { color:#64748b; font-size:0.82rem; }
+      .pill { font-family:ui-monospace,monospace; background:#d1fae5; color:#065f46; padding:2px 9px;
+              border-radius:6px; font-size:0.82rem; border:1px solid #6ee7b7; }
+      .kv-key { color:#475569; font-size:0.82rem; }
       .kv-key-hot { color:#dc2626; font-weight:700; font-size:0.82rem; }
       .caption-label { font-size:0.7rem; font-weight:700; letter-spacing:0.09em;
                        text-transform:uppercase;
-                       background:linear-gradient(90deg,#4f46e5,#0ea5e9);
+                       background:linear-gradient(90deg,#065f46,#10b981);
                        -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
       .rtl { direction:rtl; text-align:right; }
 
@@ -180,12 +192,7 @@ st.markdown(
         border-radius: 9px; font-weight: 600;
         transition: transform .1s ease, box-shadow .1s ease;
       }
-      .stButton > button:hover { transform: translateY(-1px); box-shadow: 0 6px 16px -8px rgba(79,70,229,0.6); }
-
-      /* ---- Sidebar brand block ---- */
-      section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:hover {
-        background: rgba(129,140,248,0.12); border-radius: 8px;
-      }
+      .stButton > button:hover { transform: translateY(-1px); box-shadow: 0 6px 16px -8px rgba(5,150,105,0.6); }
     </style>
     """,
     unsafe_allow_html=True,
@@ -460,9 +467,9 @@ if "reviewer_id" not in st.session_state:
 
 with st.sidebar:
     st.markdown(
-        "<div style='padding:8px 0;'><div style='font-size:1.05rem;font-weight:700;color:#f8fafc;'>"
+        "<div style='padding:8px 0;'><div style='font-size:1.05rem;font-weight:700;color:#ffffff;'>"
         "نظام قبول المستندات</div>"
-        "<div style='font-size:0.72rem;color:#64748b;'>Document Acceptance · Reviewer Console</div></div>",
+        "<div style='font-size:0.72rem;color:#a7f3d0;'>Document Acceptance · Reviewer Console</div></div>",
         unsafe_allow_html=True,
     )
     st.divider()
