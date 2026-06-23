@@ -1,20 +1,21 @@
 [theme]
-# Professional light corporate theme (deep navy on white)
-primaryColor = "#1e3a8a"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f1f5f9"
-textColor = "#1f2937"
+# Professional theme with an indigo/teal accent on a soft off-white canvas.
+primaryColor = "#4f46e5"
+backgroundColor = "#fbfcfe"
+secondaryBackgroundColor = "#eef2f9"
+textColor = "#1e293b"
 font = "sans-serif"
-baseRadius = "0.4rem"
+baseRadius = "0.6rem"
 borderColor = "#e2e8f0"
 showWidgetBorder = true
 
 [theme.sidebar]
-backgroundColor = "#0f172a"
-secondaryBackgroundColor = "#1e293b"
-textColor = "#cbd5e1"
-primaryColor = "#60a5fa"
-borderColor = "#1e293b"
+# Deep indigo gradient-friendly base for contrast against the light canvas.
+backgroundColor = "#1e1b4b"
+secondaryBackgroundColor = "#312e81"
+textColor = "#e0e7ff"
+primaryColor = "#818cf8"
+borderColor = "#312e81"
 
 [server]
 runOnSave = true

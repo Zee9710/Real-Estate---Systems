@@ -76,9 +76,9 @@ db = DBClient(cfg["db"]["path"])
 
 st.set_page_config(page_title="نظام قبول المستندات", layout="wide", initial_sidebar_state="expanded")
 
-# Colours
-NAVY, GREEN, RED, AMBER, GREY = "#1e3a8a", "#16a34a", "#dc2626", "#f59e0b", "#94a3b8"
-PALETTE = ["#1e3a8a", "#16a34a", "#f59e0b", "#dc2626", "#7c3aed", "#0891b2"]
+# Colours — vivid but professional indigo/teal family
+NAVY, GREEN, RED, AMBER, GREY = "#4f46e5", "#10b981", "#ef4444", "#f59e0b", "#94a3b8"
+PALETTE = ["#4f46e5", "#0ea5e9", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#14b8a6"]
 
 
 # ------------------------------------------------------------------
@@ -108,24 +108,84 @@ ensure_reviewer_columns()
 st.markdown(
     """
     <style>
-      .block-container { padding-top: 2rem; max-width: 1450px; }
-      .badge { display:inline-block; padding:3px 12px; border-radius:6px;
+      .block-container { padding-top: 1.6rem; max-width: 1450px; }
+
+      /* ---- Hero header ---- */
+      .hero {
+        background: linear-gradient(110deg, #4f46e5 0%, #6366f1 45%, #0ea5e9 100%);
+        border-radius: 16px; padding: 20px 26px; margin-bottom: 22px;
+        color: #fff; box-shadow: 0 10px 30px -10px rgba(79,70,229,0.55);
+      }
+      .hero h2 { margin: 0; font-size: 1.35rem; font-weight: 700; color: #fff; }
+      .hero p  { margin: 4px 0 0 0; font-size: 0.85rem; color: #e0e7ff; }
+
+      /* ---- Metric cards get colour + lift ---- */
+      div[data-testid="stMetric"] {
+        background: #ffffff;
+        border: 1px solid #e9edf5;
+        border-left: 5px solid #4f46e5;
+        border-radius: 12px; padding: 16px 18px;
+        box-shadow: 0 4px 14px -8px rgba(30,41,59,0.25);
+        transition: transform .12s ease, box-shadow .12s ease;
+      }
+      div[data-testid="stMetric"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 22px -10px rgba(30,41,59,0.35);
+      }
+      div[data-testid="stMetricValue"] { color:#1e1b4b; font-weight:700; }
+      div[data-testid="stMetricLabel"] p { color:#64748b !important; font-weight:600; }
+
+      /* Rotate the accent colour of metric cards across a row */
+      div[data-testid="column"]:nth-child(5n+1) div[data-testid="stMetric"] { border-left-color:#4f46e5; }
+      div[data-testid="column"]:nth-child(5n+2) div[data-testid="stMetric"] { border-left-color:#16a34a; }
+      div[data-testid="column"]:nth-child(5n+3) div[data-testid="stMetric"] { border-left-color:#dc2626; }
+      div[data-testid="column"]:nth-child(5n+4) div[data-testid="stMetric"] { border-left-color:#f59e0b; }
+      div[data-testid="column"]:nth-child(5n+5) div[data-testid="stMetric"] { border-left-color:#0ea5e9; }
+
+      /* ---- Bordered containers as soft cards ---- */
+      div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-radius: 14px !important;
+        box-shadow: 0 2px 10px -6px rgba(30,41,59,0.18);
+      }
+
+      /* ---- Badges (richer, pill-shaped) ---- */
+      .badge { display:inline-block; padding:4px 14px; border-radius:999px;
                font-size:0.72rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; }
-      .badge-accept  { background:#dcfce7; color:#166534; }
-      .badge-reject  { background:#fee2e2; color:#991b1b; }
-      .badge-flag    { background:#fef3c7; color:#92400e; }
-      .badge-pending { background:#e2e8f0; color:#475569; }
-      .panel-ar { direction:rtl; text-align:right; background:#f8fafc; border-right:3px solid #1e3a8a;
-                  padding:12px 16px; border-radius:8px 0 0 8px; font-size:1.02rem; line-height:1.85; color:#1e293b; }
-      .panel-en { background:#f8fafc; border-left:3px solid #16a34a; padding:12px 16px;
-                  border-radius:0 8px 8px 0; font-size:0.95rem; line-height:1.6; color:#1e293b; margin-bottom:10px; }
-      .pill { font-family:ui-monospace,monospace; background:#f1f5f9; color:#475569; padding:2px 8px;
-              border-radius:5px; font-size:0.82rem; border:1px solid #e2e8f0; }
+      .badge-accept  { background:linear-gradient(135deg,#bbf7d0,#86efac); color:#14532d; }
+      .badge-reject  { background:linear-gradient(135deg,#fecaca,#fca5a5); color:#7f1d1d; }
+      .badge-flag    { background:linear-gradient(135deg,#fde68a,#fcd34d); color:#78350f; }
+      .badge-pending { background:linear-gradient(135deg,#e2e8f0,#cbd5e1); color:#334155; }
+
+      /* ---- Explanation panels ---- */
+      .panel-ar { direction:rtl; text-align:right;
+                  background:linear-gradient(95deg,#eef2ff,#f8fafc); border-right:4px solid #4f46e5;
+                  padding:13px 17px; border-radius:10px 0 0 10px; font-size:1.02rem; line-height:1.85; color:#1e293b; }
+      .panel-en { background:linear-gradient(265deg,#ecfdf5,#f8fafc); border-left:4px solid #10b981;
+                  padding:13px 17px; border-radius:0 10px 10px 0; font-size:0.95rem; line-height:1.6;
+                  color:#1e293b; margin-bottom:10px; }
+
+      /* ---- Pills / keys ---- */
+      .pill { font-family:ui-monospace,monospace; background:#eef2ff; color:#4338ca; padding:2px 9px;
+              border-radius:6px; font-size:0.82rem; border:1px solid #c7d2fe; }
       .kv-key { color:#64748b; font-size:0.82rem; }
       .kv-key-hot { color:#dc2626; font-weight:700; font-size:0.82rem; }
-      .caption-label { font-size:0.7rem; font-weight:600; letter-spacing:0.08em;
-                       text-transform:uppercase; color:#94a3b8; }
+      .caption-label { font-size:0.7rem; font-weight:700; letter-spacing:0.09em;
+                       text-transform:uppercase;
+                       background:linear-gradient(90deg,#4f46e5,#0ea5e9);
+                       -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
       .rtl { direction:rtl; text-align:right; }
+
+      /* ---- Buttons ---- */
+      .stButton > button {
+        border-radius: 9px; font-weight: 600;
+        transition: transform .1s ease, box-shadow .1s ease;
+      }
+      .stButton > button:hover { transform: translateY(-1px); box-shadow: 0 6px 16px -8px rgba(79,70,229,0.6); }
+
+      /* ---- Sidebar brand block ---- */
+      section[data-testid="stSidebar"] .stRadio [role="radiogroup"] label:hover {
+        background: rgba(129,140,248,0.12); border-radius: 8px;
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -228,6 +288,12 @@ def badge(decision: str) -> str:
     if d == "rejected":
         return '<span class="badge badge-reject">مرفوض · Rejected</span>'
     return '<span class="badge badge-pending">قيد الانتظار · Pending</span>'
+
+
+def page_header(title: str, subtitle: str = ""):
+    """Gradient hero header used at the top of every page."""
+    sub = f"<p>{subtitle}</p>" if subtitle else ""
+    st.markdown(f"<div class='hero'><h2>{title}</h2>{sub}</div>", unsafe_allow_html=True)
 
 
 def _lookup_historical(ids: list[str]) -> dict:
@@ -446,7 +512,7 @@ if not health:
 # PAGE: Dashboard
 # ==================================================================
 if page.startswith("لوحة التحكم"):
-    st.subheader("لوحة التحكم (Dashboard)")
+    page_header("لوحة التحكم", "Dashboard · نظرة عامة على حالة النظام وسير العمل")
     df = load_incoming()
     if df.empty:
         st.info("لا توجد حالات بعد (no cases yet). أضف حالة من صفحة إضافة حالة.")
@@ -505,7 +571,7 @@ if page.startswith("لوحة التحكم"):
 # PAGE: Review Queue
 # ==================================================================
 elif page.startswith("المراجعة"):
-    st.subheader("المراجعة البشرية (Human Review Queue)")
+    page_header("المراجعة البشرية", "Human Review Queue · اعتماد الحالات المُرشّحة")
     df = load_incoming()
     rows = df.to_dict("records") if not df.empty else []
     queue = [r for r in rows if r.get("needs_review") == 1 and not r.get("reviewed")]
@@ -607,7 +673,7 @@ elif page.startswith("المراجعة"):
 # PAGE: Submit Case  (with 5 most-similar historical cases)
 # ==================================================================
 elif page.startswith("إضافة"):
-    st.subheader("إضافة حالة (Submit Case)")
+    page_header("إضافة حالة", "Submit Case · إدخال حالة جديدة وعرض أقرب الحالات المشابهة")
     st.caption("أدخل حالة جديدة وستظهر أقرب الحالات التاريخية المشابهة بعد المعالجة "
                "(insert a case; the nearest historical cases appear after processing).")
 
@@ -674,7 +740,7 @@ elif page.startswith("إضافة"):
 # PAGE: All Incoming
 # ==================================================================
 elif page.startswith("الحالات الواردة"):
-    st.subheader("الحالات الواردة (All Incoming Cases)")
+    page_header("الحالات الواردة", "All Incoming Cases · تصفية وبحث وتصدير")
     df = load_incoming()
     if df.empty:
         st.info("لا توجد حالات واردة (no incoming cases).")
@@ -724,7 +790,7 @@ elif page.startswith("الحالات الواردة"):
 # PAGE: Historical
 # ==================================================================
 elif page.startswith("المجموعة"):
-    st.subheader("المجموعة التاريخية (Historical Cases)")
+    page_header("المجموعة التاريخية", "Historical Cases · قاعدة المعرفة المعتمدة")
     df = load_historical()
     if df.empty:
         st.info("لا توجد حالات تاريخية (no historical cases). Run scripts/seed_db.py.")
@@ -777,7 +843,7 @@ elif page.startswith("المجموعة"):
 # PAGE: Calibration & Indexing
 # ==================================================================
 elif page.startswith("المعايرة"):
-    st.subheader("المعايرة والفهرسة (Calibration & Indexing)")
+    page_header("المعايرة والفهرسة", "Calibration & Indexing · مراقبة عتبة التجدد")
     df = load_incoming()
 
     threshold = (calib or {}).get("threshold")
@@ -820,7 +886,7 @@ elif page.startswith("المعايرة"):
 # PAGE: Rules reference
 # ==================================================================
 elif page.startswith("قواعد"):
-    st.subheader("قواعد القبول (Acceptance Rules)")
+    page_header("قواعد القبول", "Acceptance Rules · القواعد العشر المرجعية")
     st.info("هذه القواعد هي المرجع الوحيد للقرار — لا يمكن للذكاء الاصطناعي تجاوزها. "
             "These 10 deterministic rules are authoritative; the LLM only explains, it never decides.")
     rules_df = pd.DataFrame(RULES, columns=["reason_code", "القاعدة (Rule)", "القرار (Decision)"])
