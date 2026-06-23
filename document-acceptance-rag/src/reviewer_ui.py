@@ -2,6 +2,10 @@
 Document Acceptance — Reviewer Console (Streamlit).
 
 Run with:  streamlit run src/reviewer_ui.py
+
+Design approach: native Streamlit theming (.streamlit/config.toml) plus native
+bordered containers, st.metric and st.column_config. CSS injection is limited to
+the few things Streamlit cannot express natively (RTL Arabic, inline badges).
 """
 from __future__ import annotations
 
@@ -42,126 +46,42 @@ API_BASE = os.environ.get("API_BASE", "http://localhost:8000")
 
 st.set_page_config(
     page_title="Document Acceptance Console",
-    page_icon="assets/favicon.png" if os.path.exists("assets/favicon.png") else None,
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ------------------------------------------------------------------
-# Design system
-# ------------------------------------------------------------------
+# Minimal CSS — only for what native theming can't express.
 st.markdown(
     """
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-      html, body, [class*="css"] {
-        font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
-      }
-
-      .block-container {
-        padding-top: 2rem;
-        padding-bottom: 3rem;
-        max-width: 1400px;
-      }
-
-      /* Metric cards */
-      div[data-testid="stMetric"] {
-        background: #0f1117;
-        border: 1px solid #1e2433;
-        border-radius: 10px;
-        padding: 20px 22px;
-      }
-      div[data-testid="stMetric"] label p {
-        color: #6b7694 !important;
-        font-size: 0.75rem;
-        font-weight: 600;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-      div[data-testid="stMetricValue"] {
-        color: #e8eaf2;
-        font-size: 1.9rem;
-        font-weight: 700;
-      }
-
-      /* Status badges */
+      .block-container { padding-top: 2.2rem; max-width: 1400px; }
       .badge {
-        display: inline-block;
-        padding: 4px 14px;
-        border-radius: 4px;
-        font-size: 0.72rem;
-        font-weight: 700;
-        letter-spacing: 0.06em;
+        display: inline-block; padding: 3px 12px; border-radius: 6px;
+        font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em;
         text-transform: uppercase;
       }
-      .badge-accept { background: #052e16; color: #86efac; border: 1px solid #166534; }
-      .badge-reject { background: #2d0a0a; color: #fca5a5; border: 1px solid #7f1d1d; }
-      .badge-pending { background: #1a1a2e; color: #93c5fd; border: 1px solid #1e3a5f; }
-
-      /* Explanation panels */
-      .panel-en {
-        background: #0b1a13;
-        border-left: 3px solid #22c55e;
-        padding: 12px 16px;
-        border-radius: 0 8px 8px 0;
-        margin-bottom: 10px;
-        font-size: 0.95rem;
-        line-height: 1.6;
-        color: #d1fae5;
-      }
+      .badge-accept  { background: #dcfce7; color: #166534; }
+      .badge-reject  { background: #fee2e2; color: #991b1b; }
+      .badge-pending { background: #e0e7ff; color: #3730a3; }
       .panel-ar {
-        direction: rtl;
-        text-align: right;
-        background: #0d1525;
-        border-right: 3px solid #3b82f6;
-        padding: 12px 16px;
-        border-radius: 8px 0 0 8px;
-        font-size: 1rem;
-        line-height: 1.8;
-        color: #bfdbfe;
+        direction: rtl; text-align: right; background: #f8fafc;
+        border-right: 3px solid #1e3a8a; padding: 12px 16px;
+        border-radius: 8px 0 0 8px; font-size: 1.02rem; line-height: 1.85;
+        color: #1e293b;
       }
-
-      /* Monospace pill */
+      .panel-en {
+        background: #f8fafc; border-left: 3px solid #16a34a;
+        padding: 12px 16px; border-radius: 0 8px 8px 0;
+        font-size: 0.95rem; line-height: 1.6; color: #1e293b; margin-bottom: 10px;
+      }
       .pill {
-        font-family: ui-monospace, 'Cascadia Code', monospace;
-        background: #1a1d2e;
-        color: #94a3b8;
-        padding: 2px 9px;
-        border-radius: 5px;
-        font-size: 0.82rem;
-        border: 1px solid #2a2d3e;
+        font-family: ui-monospace, monospace; background: #f1f5f9;
+        color: #475569; padding: 2px 8px; border-radius: 5px;
+        font-size: 0.82rem; border: 1px solid #e2e8f0;
       }
-
-      /* Section divider */
-      .section-rule {
-        border: none;
-        border-top: 1px solid #1e2433;
-        margin: 1.5rem 0;
-      }
-
-      /* Sidebar tweaks */
-      section[data-testid="stSidebar"] {
-        background: #090c14;
-        border-right: 1px solid #1e2433;
-      }
-      section[data-testid="stSidebar"] .stRadio label {
-        font-size: 0.88rem;
-        color: #8a94b0;
-      }
-
-      /* Page title style */
-      .page-title {
-        font-size: 1.45rem;
-        font-weight: 700;
-        color: #e2e8f0;
-        margin-bottom: 0.15rem;
-        letter-spacing: -0.01em;
-      }
-      .page-sub {
-        font-size: 0.82rem;
-        color: #4b5675;
-        margin-bottom: 1.6rem;
+      .caption-label {
+        font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em;
+        text-transform: uppercase; color: #94a3b8;
       }
     </style>
     """,
@@ -213,13 +133,22 @@ def load_historical() -> pd.DataFrame:
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
+def alt_theme(chart):
+    """Apply consistent transparent background + no view border."""
+    return chart.configure_view(strokeWidth=0).configure(background="transparent")
+
+
 ATTR_FIELDS = [
     "document_type", "owner_name", "owner_id", "property_id",
     "property_type", "area_sqm", "address", "city",
     "notarized", "owner_signature", "liens_present", "registration_date",
 ]
 
-CHART_COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"]
+NAVY = "#1e3a8a"
+GREEN = "#16a34a"
+RED = "#dc2626"
+AMBER = "#f59e0b"
+PALETTE = ["#1e3a8a", "#16a34a", "#f59e0b", "#dc2626", "#7c3aed", "#0891b2"]
 
 
 # ------------------------------------------------------------------
@@ -227,15 +156,12 @@ CHART_COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"
 # ------------------------------------------------------------------
 with st.sidebar:
     st.markdown(
-        "<div style='padding: 18px 0 6px 0;'>"
-        "<span style='font-size:1.15rem;font-weight:700;color:#e2e8f0;letter-spacing:-0.01em;'>"
-        "Document Acceptance</span><br>"
-        "<span style='font-size:0.75rem;color:#4b5675;'>Reviewer Console</span>"
-        "</div>",
+        "<div style='padding:10px 0 4px 0;'>"
+        "<div style='font-size:1.1rem;font-weight:700;color:#f8fafc;'>Document Acceptance</div>"
+        "<div style='font-size:0.74rem;color:#64748b;'>Reviewer Console</div></div>",
         unsafe_allow_html=True,
     )
-
-    st.markdown("<hr class='section-rule'>", unsafe_allow_html=True)
+    st.divider()
 
     page = st.radio(
         "Navigation",
@@ -243,182 +169,141 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
-    st.markdown("<hr class='section-rule'>", unsafe_allow_html=True)
-    st.markdown(
-        "<span style='font-size:0.7rem;font-weight:600;letter-spacing:0.08em;"
-        "text-transform:uppercase;color:#4b5675;'>System Status</span>",
-        unsafe_allow_html=True,
-    )
+    st.divider()
+    st.markdown("<span class='caption-label'>System Status</span>", unsafe_allow_html=True)
 
     health = api_get("/health")
     if health:
         st.markdown(
-            "<span style='color:#22c55e;font-size:0.82rem;font-weight:600;'>● Backend online</span>",
+            "<span style='color:#22c55e;font-size:0.84rem;font-weight:600;'>● Online</span>",
             unsafe_allow_html=True,
         )
         st.metric("Indexed cases", health.get("chroma_count", "—"))
-        st.caption(f"Version: {health.get('active_version', '—')}")
     else:
         st.markdown(
-            "<span style='color:#ef4444;font-size:0.82rem;font-weight:600;'>● Backend offline</span>",
+            "<span style='color:#ef4444;font-size:0.84rem;font-weight:600;'>● Offline</span>",
             unsafe_allow_html=True,
         )
+        st.caption("Start: uvicorn src.main:app")
 
     calib = api_get("/calibration")
     if calib and "threshold" in calib:
         st.metric("Novelty threshold", f"{calib['threshold']:.4f}")
 
-    st.markdown("<hr class='section-rule'>", unsafe_allow_html=True)
-
+    st.divider()
     if st.button("Reindex & Recalibrate", use_container_width=True):
-        with st.spinner("Rebuilding index from historical cases…"):
-            res, err = api_post("/reindex")
-        if err:
-            st.error(f"Failed: {err}")
-        else:
-            st.success("Reindex complete.")
-
+        with st.spinner("Rebuilding index…"):
+            _, err = api_post("/reindex")
+        st.error(f"Failed: {err}") if err else st.success("Reindex complete.")
     if st.button("Process Pending Now", use_container_width=True):
-        with st.spinner("Processing pending cases…"):
+        with st.spinner("Processing…"):
             res, err = api_post("/process")
-        if err:
-            st.error(f"Failed: {err}")
-        else:
-            n = res.get("processed", 0) if res else 0
-            st.success(f"Processed {n} case(s).")
+        st.error(f"Failed: {err}") if err else st.success(
+            f"Processed {res.get('processed', 0) if res else 0} case(s)."
+        )
 
 
 # ==================================================================
 # DASHBOARD
 # ==================================================================
 if page == "Dashboard":
-    st.markdown("<div class='page-title'>Dashboard</div>", unsafe_allow_html=True)
-    st.markdown("<div class='page-sub'>Live summary of all incoming cases and processing status</div>", unsafe_allow_html=True)
+    st.subheader("Dashboard")
+    st.caption("Live summary of all incoming cases and processing status")
 
     df = load_incoming()
-
     if df.empty:
-        st.info("No cases processed yet. Insert a case using Submit Case or run the seeder.")
+        st.info("No cases processed yet. Use Submit Case or run the seeder.")
     else:
         total = len(df)
         done = int((df["status"] == "done").sum()) if "status" in df else 0
         pending = int((df["status"] == "pending").sum()) if "status" in df else 0
         accepted = int((df["decision"] == "Accepted").sum()) if "decision" in df else 0
-        rejected = int((df["decision"] == "Rejected").sum()) if "decision" in df else 0
         awaiting = int(
             ((df["needs_review"] == 1) & (df["validated_by"].isna() | (df["validated_by"] == ""))).sum()
         ) if "needs_review" in df and "validated_by" in df else 0
 
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Total Cases", total)
-        c2.metric("Processed", done)
-        c3.metric("Pending", pending)
-        c4.metric("Accepted", accepted)
-        c5.metric("Awaiting Review", awaiting)
+        m = st.columns(5)
+        m[0].metric("Total Cases", total)
+        m[1].metric("Processed", done)
+        m[2].metric("Pending", pending)
+        m[3].metric("Accepted", accepted)
+        m[4].metric("Awaiting Review", awaiting, delta=None)
 
-        st.markdown("<hr class='section-rule'>", unsafe_allow_html=True)
-
+        st.write("")
         col_a, col_b = st.columns(2)
 
         with col_a:
-            st.markdown("**Decision breakdown**")
-            if "decision" in df and df["decision"].notna().any():
-                dc = df["decision"].fillna("Unprocessed").value_counts().reset_index()
-                dc.columns = ["decision", "count"]
-                if _HAS_ALT:
-                    color_map = {"Accepted": "#22c55e", "Rejected": "#ef4444", "Unprocessed": "#374151"}
-                    chart = (
-                        alt.Chart(dc)
-                        .mark_arc(innerRadius=55, outerRadius=90)
-                        .encode(
-                            theta=alt.Theta("count:Q"),
-                            color=alt.Color(
-                                "decision:N",
-                                scale=alt.Scale(
-                                    domain=list(color_map.keys()),
-                                    range=list(color_map.values()),
-                                ),
-                                legend=alt.Legend(orient="right"),
-                            ),
+            with st.container(border=True):
+                st.markdown("**Decision breakdown**")
+                if "decision" in df and df["decision"].notna().any():
+                    dc = df["decision"].fillna("Unprocessed").value_counts().reset_index()
+                    dc.columns = ["decision", "count"]
+                    if _HAS_ALT:
+                        cmap = {"Accepted": GREEN, "Rejected": RED, "Unprocessed": "#cbd5e1"}
+                        chart = alt.Chart(dc).mark_arc(innerRadius=55, outerRadius=90).encode(
+                            theta="count:Q",
+                            color=alt.Color("decision:N", scale=alt.Scale(
+                                domain=list(cmap), range=list(cmap.values())),
+                                legend=alt.Legend(orient="right")),
                             tooltip=["decision:N", "count:Q"],
-                        )
-                        .properties(height=220)
-                        .configure_view(strokeWidth=0)
-                        .configure(background="transparent")
-                    )
-                    st.altair_chart(chart, use_container_width=True)
+                        ).properties(height=230)
+                        st.altair_chart(alt_theme(chart), use_container_width=True)
+                    else:
+                        st.bar_chart(dc.set_index("decision"))
                 else:
-                    st.bar_chart(dc.set_index("decision"))
+                    st.caption("No decisions yet.")
 
         with col_b:
-            st.markdown("**Rejection reasons**")
-            rej = df[df["decision"] == "Rejected"] if "decision" in df else pd.DataFrame()
-            if not rej.empty and "reason_code" in rej.columns:
-                rc = rej["reason_code"].value_counts().reset_index()
-                rc.columns = ["reason_code", "count"]
-                if _HAS_ALT:
-                    chart = (
-                        alt.Chart(rc)
-                        .mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4)
-                        .encode(
+            with st.container(border=True):
+                st.markdown("**Rejection reasons**")
+                rej = df[df["decision"] == "Rejected"] if "decision" in df else pd.DataFrame()
+                if not rej.empty and "reason_code" in rej.columns:
+                    rc = rej["reason_code"].value_counts().reset_index()
+                    rc.columns = ["reason_code", "count"]
+                    if _HAS_ALT:
+                        chart = alt.Chart(rc).mark_bar(
+                            cornerRadiusTopRight=3, cornerRadiusBottomRight=3, color=RED).encode(
                             x=alt.X("count:Q", title="Cases"),
                             y=alt.Y("reason_code:N", sort="-x", title=None),
-                            color=alt.value("#ef4444"),
                             tooltip=["reason_code:N", "count:Q"],
-                        )
-                        .properties(height=220)
-                        .configure_view(strokeWidth=0)
-                        .configure(background="transparent")
-                    )
-                    st.altair_chart(chart, use_container_width=True)
+                        ).properties(height=230)
+                        st.altair_chart(alt_theme(chart), use_container_width=True)
+                    else:
+                        st.bar_chart(rc.set_index("reason_code"))
                 else:
-                    st.bar_chart(rc.set_index("reason_code"))
-            else:
-                st.caption("No rejection data yet.")
+                    st.caption("No rejections yet.")
 
-        st.markdown("<hr class='section-rule'>", unsafe_allow_html=True)
-        st.markdown("**Novelty distance distribution**")
-        if "nn_distance" in df and df["nn_distance"].notna().any():
-            nd = df[["nn_distance"]].dropna()
-            thr = calib.get("threshold") if calib else None
-            if _HAS_ALT:
-                base = (
-                    alt.Chart(nd)
-                    .mark_bar(color="#3b82f6", opacity=0.75)
-                    .encode(
+        st.write("")
+        with st.container(border=True):
+            st.markdown("**Novelty distance distribution**")
+            if "nn_distance" in df and df["nn_distance"].notna().any():
+                nd = df[["nn_distance"]].dropna()
+                thr = calib.get("threshold") if calib else None
+                if _HAS_ALT:
+                    base = alt.Chart(nd).mark_bar(color=NAVY, opacity=0.8).encode(
                         x=alt.X("nn_distance:Q", bin=alt.Bin(maxbins=30), title="Nearest-neighbour distance"),
                         y=alt.Y("count()", title="Cases"),
-                        tooltip=["count()"],
                     )
-                )
-                layers = base
-                if thr:
-                    rule = (
-                        alt.Chart(pd.DataFrame({"t": [thr]}))
-                        .mark_rule(color="#f59e0b", strokeDash=[5, 4], size=2)
-                        .encode(x="t:Q")
-                    )
-                    layers = base + rule
-                st.altair_chart(
-                    layers.properties(height=180)
-                    .configure_view(strokeWidth=0)
-                    .configure(background="transparent"),
-                    use_container_width=True,
-                )
-                if thr:
-                    st.caption(f"Amber line = novelty threshold ({thr:.4f}). Cases right of the line are flagged as novel.")
+                    layers = base
+                    if thr:
+                        rule = alt.Chart(pd.DataFrame({"t": [thr]})).mark_rule(
+                            color=AMBER, strokeDash=[5, 4], size=2).encode(x="t:Q")
+                        layers = base + rule
+                    st.altair_chart(alt_theme(layers.properties(height=190)), use_container_width=True)
+                    if thr:
+                        st.caption(f"Amber line marks the novelty threshold ({thr:.4f}); cases to the right are flagged.")
+                else:
+                    st.bar_chart(nd)
             else:
-                st.bar_chart(nd)
-        else:
-            st.caption("No novelty scores recorded yet.")
+                st.caption("No novelty scores yet.")
 
 
 # ==================================================================
 # REVIEW QUEUE
 # ==================================================================
 elif page == "Review Queue":
-    st.markdown("<div class='page-title'>Review Queue</div>", unsafe_allow_html=True)
-    st.markdown("<div class='page-sub'>Cases flagged by the novelty detector or rule engine that require human validation</div>", unsafe_allow_html=True)
+    st.subheader("Review Queue")
+    st.caption("Cases flagged for human validation by the rule engine or novelty detector")
 
     df = load_incoming()
     rows = df.to_dict("records") if not df.empty else []
@@ -428,59 +313,57 @@ elif page == "Review Queue":
         st.success("No cases pending review.")
     else:
         st.caption(f"{len(flagged)} case(s) awaiting validation")
-
         for case in flagged:
-            label = f"{case['case_id']}  —  {case.get('decision', '')}  ·  {case.get('reason_code', '')}  ·  {case.get('flag_reason', '')}"
-            with st.expander(label, expanded=False):
-                st.markdown(badge(case.get("decision", "")), unsafe_allow_html=True)
-                st.markdown("<br>", unsafe_allow_html=True)
+            with st.container(border=True):
+                head = st.columns([3, 1])
+                head[0].markdown(f"**{case['case_id']}**")
+                head[1].markdown(badge(case.get("decision", "")), unsafe_allow_html=True)
 
                 col1, col2 = st.columns([1, 1])
                 with col1:
-                    st.markdown("**Case attributes**")
+                    st.markdown("<span class='caption-label'>Case attributes</span>", unsafe_allow_html=True)
                     attrs = {f: case.get(f) for f in ATTR_FIELDS if case.get(f) not in (None, "")}
-                    st.table(pd.DataFrame(list(attrs.items()), columns=["Field", "Value"]))
-
+                    st.dataframe(
+                        pd.DataFrame(list(attrs.items()), columns=["Field", "Value"]),
+                        hide_index=True, use_container_width=True,
+                    )
                 with col2:
-                    st.markdown("**Decision context**")
+                    st.markdown("<span class='caption-label'>Decision context</span>", unsafe_allow_html=True)
                     st.markdown(
-                        f"Reason code &nbsp; <span class='pill'>{case.get('reason_code', '')}</span><br>"
-                        f"Flag reason &nbsp;&nbsp; <span class='pill'>{case.get('flag_reason', '')}</span>",
+                        f"Reason &nbsp;<span class='pill'>{case.get('reason_code','')}</span> "
+                        f"&nbsp; Flag &nbsp;<span class='pill'>{case.get('flag_reason','')}</span>",
                         unsafe_allow_html=True,
                     )
                     nn = case.get("nn_distance")
                     if nn is not None:
-                        st.markdown(f"NN distance &nbsp;&nbsp; <span class='pill'>{float(nn):.4f}</span>", unsafe_allow_html=True)
+                        st.markdown(f"Distance &nbsp;<span class='pill'>{float(nn):.4f}</span>", unsafe_allow_html=True)
                     retrieved = case.get("retrieved_case_ids", "")
                     if retrieved:
-                        st.markdown(f"Nearest cases &nbsp; <span class='pill'>{retrieved}</span>", unsafe_allow_html=True)
+                        st.markdown(f"Nearest &nbsp;<span class='pill'>{retrieved}</span>", unsafe_allow_html=True)
+                    st.write("")
+                    st.markdown(f"<div class='panel-en'>{case.get('recommendation_en','—')}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='panel-ar'>{case.get('recommendation_ar','—')}</div>", unsafe_allow_html=True)
 
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    st.markdown("**Explanation**")
-                    st.markdown(f"<div class='panel-en'>{case.get('recommendation_en', '—')}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='panel-ar'>{case.get('recommendation_ar', '—')}</div>", unsafe_allow_html=True)
-
-                st.markdown("<hr class='section-rule'>", unsafe_allow_html=True)
-                reviewer_id = st.text_input(
-                    "Reviewer ID", key=f"rev_{case['case_id']}", placeholder="e.g. EMP-042"
+                rev_col, btn_col = st.columns([2, 1])
+                reviewer_id = rev_col.text_input(
+                    "Reviewer ID", key=f"rev_{case['case_id']}", placeholder="e.g. EMP-042",
+                    label_visibility="collapsed",
                 )
-                b1, b2, _ = st.columns([1, 1, 4])
-                with b1:
-                    if st.button("Validate", key=f"val_{case['case_id']}", use_container_width=True):
-                        if not reviewer_id.strip():
-                            st.error("Enter your reviewer ID first.")
-                        else:
-                            db.write_recommendation(case["case_id"], {"validated_by": reviewer_id.strip()})
-                            st.success(f"Validated by {reviewer_id}. Will be promoted to historical on next poll.")
-                            st.rerun()
+                if btn_col.button("Validate", key=f"val_{case['case_id']}", use_container_width=True):
+                    if not reviewer_id.strip():
+                        st.error("Enter your reviewer ID first.")
+                    else:
+                        db.write_recommendation(case["case_id"], {"validated_by": reviewer_id.strip()})
+                        st.success(f"Validated by {reviewer_id}.")
+                        st.rerun()
 
 
 # ==================================================================
 # SUBMIT CASE
 # ==================================================================
 elif page == "Submit Case":
-    st.markdown("<div class='page-title'>Submit Case</div>", unsafe_allow_html=True)
-    st.markdown("<div class='page-sub'>Insert a new case into the processing queue</div>", unsafe_allow_html=True)
+    st.subheader("Submit Case")
+    st.caption("Insert a new case into the processing queue")
 
     with st.form("new_case"):
         c1, c2, c3 = st.columns(3)
@@ -526,7 +409,6 @@ elif page == "Submit Case":
             }
             db.upsert_incoming(row)
             st.success(f"Case {case_id} inserted.")
-
             if process_now:
                 with st.spinner("Running rule engine, novelty detection and explanation…"):
                     res, err = api_post(f"/process?case_id={case_id.strip()}")
@@ -534,36 +416,34 @@ elif page == "Submit Case":
                     st.warning(f"Inserted, but processing failed: {err}")
                 elif res and res.get("results"):
                     out = res["results"][0]
-                    st.markdown(badge(out.get("decision", "")), unsafe_allow_html=True)
-                    st.markdown(f"<br>Reason code &nbsp; <span class='pill'>{out.get('reason_code','')}</span>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='panel-en'>{out.get('recommendation_en', '—')}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='panel-ar'>{out.get('recommendation_ar', '—')}</div>", unsafe_allow_html=True)
-                    if out.get("needs_review"):
-                        st.info("Case has been flagged and added to the Review Queue.")
+                    with st.container(border=True):
+                        st.markdown(badge(out.get("decision", "")), unsafe_allow_html=True)
+                        st.markdown(f"<br>Reason &nbsp;<span class='pill'>{out.get('reason_code','')}</span>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='panel-en'>{out.get('recommendation_en','—')}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='panel-ar'>{out.get('recommendation_ar','—')}</div>", unsafe_allow_html=True)
+                        if out.get("needs_review"):
+                            st.info("Case flagged and added to the Review Queue.")
                 else:
-                    st.info("Case processed. Check the Case Explorer for results.")
+                    st.info("Case processed. Check the Case Explorer.")
 
 
 # ==================================================================
 # CASE EXPLORER
 # ==================================================================
 elif page == "Case Explorer":
-    st.markdown("<div class='page-title'>Case Explorer</div>", unsafe_allow_html=True)
-    st.markdown("<div class='page-sub'>Search, filter and export incoming cases</div>", unsafe_allow_html=True)
+    st.subheader("Case Explorer")
+    st.caption("Search, filter and export incoming cases")
 
     df = load_incoming()
     if df.empty:
         st.info("No incoming cases yet.")
     else:
         f1, f2, f3 = st.columns(3)
-        with f1:
-            statuses = df["status"].dropna().unique().tolist() if "status" in df else []
-            status_filter = st.multiselect("Status", statuses, default=statuses)
-        with f2:
-            decisions = df["decision"].dropna().unique().tolist() if "decision" in df else []
-            decision_filter = st.multiselect("Decision", decisions, default=decisions)
-        with f3:
-            search = st.text_input("Search case ID or owner name")
+        statuses = df["status"].dropna().unique().tolist() if "status" in df else []
+        decisions = df["decision"].dropna().unique().tolist() if "decision" in df else []
+        status_filter = f1.multiselect("Status", statuses, default=statuses)
+        decision_filter = f2.multiselect("Decision", decisions, default=decisions)
+        search = f3.text_input("Search case ID or owner name")
 
         view = df.copy()
         if status_filter and "status" in view:
@@ -584,12 +464,20 @@ elif page == "Case Explorer":
             "case_id", "status", "decision", "reason_code", "flag_reason",
             "needs_review", "validated_by", "nn_distance", "processed_at",
         ]
+        present = [c for c in display_cols if c in view.columns]
         st.dataframe(
-            view[[c for c in display_cols if c in view.columns]],
+            view[present],
             use_container_width=True,
             hide_index=True,
+            column_config={
+                "case_id": st.column_config.TextColumn("Case ID"),
+                "decision": st.column_config.TextColumn("Decision"),
+                "reason_code": st.column_config.TextColumn("Reason"),
+                "needs_review": st.column_config.CheckboxColumn("Flagged"),
+                "nn_distance": st.column_config.NumberColumn("NN dist.", format="%.4f"),
+                "processed_at": st.column_config.DatetimeColumn("Processed"),
+            },
         )
-
         st.download_button(
             "Export as CSV",
             view.to_csv(index=False).encode("utf-8-sig"),
@@ -602,76 +490,59 @@ elif page == "Case Explorer":
 # HISTORICAL
 # ==================================================================
 elif page == "Historical":
-    st.markdown("<div class='page-title'>Historical Knowledge Base</div>", unsafe_allow_html=True)
-    st.markdown("<div class='page-sub'>Validated cases used for embedding retrieval and novelty calibration</div>", unsafe_allow_html=True)
+    st.subheader("Historical Knowledge Base")
+    st.caption("Validated cases used for embedding retrieval and novelty calibration")
 
     df = load_historical()
     if df.empty:
         st.info("No historical cases yet. Run scripts/seed_db.py.")
     else:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total Cases", len(df))
+        m = st.columns(3)
+        m[0].metric("Total Cases", len(df))
         if "decision" in df:
-            c2.metric("Accepted", int((df["decision"] == "Accepted").sum()))
-            c3.metric("Rejected", int((df["decision"] == "Rejected").sum()))
+            m[1].metric("Accepted", int((df["decision"] == "Accepted").sum()))
+            m[2].metric("Rejected", int((df["decision"] == "Rejected").sum()))
 
-        st.markdown("<hr class='section-rule'>", unsafe_allow_html=True)
-
+        st.write("")
         col_a, col_b = st.columns(2)
         with col_a:
-            if "city" in df and df["city"].notna().any():
+            with st.container(border=True):
                 st.markdown("**Cases by city**")
-                cc = df["city"].value_counts().head(12).reset_index()
-                cc.columns = ["city", "count"]
-                if _HAS_ALT:
-                    st.altair_chart(
-                        alt.Chart(cc)
-                        .mark_bar(cornerRadiusTopRight=4, cornerRadiusBottomRight=4, color="#3b82f6")
-                        .encode(
+                if "city" in df and df["city"].notna().any():
+                    cc = df["city"].value_counts().head(12).reset_index()
+                    cc.columns = ["city", "count"]
+                    if _HAS_ALT:
+                        chart = alt.Chart(cc).mark_bar(
+                            cornerRadiusTopRight=3, cornerRadiusBottomRight=3, color=NAVY).encode(
                             x=alt.X("count:Q", title="Cases"),
                             y=alt.Y("city:N", sort="-x", title=None),
                             tooltip=["city:N", "count:Q"],
-                        )
-                        .properties(height=260)
-                        .configure_view(strokeWidth=0)
-                        .configure(background="transparent"),
-                        use_container_width=True,
-                    )
-                else:
-                    st.bar_chart(cc.set_index("city"))
-
+                        ).properties(height=270)
+                        st.altair_chart(alt_theme(chart), use_container_width=True)
+                    else:
+                        st.bar_chart(cc.set_index("city"))
         with col_b:
-            if "property_type" in df and df["property_type"].notna().any():
+            with st.container(border=True):
                 st.markdown("**Cases by property type**")
-                pc = df["property_type"].value_counts().reset_index()
-                pc.columns = ["property_type", "count"]
-                if _HAS_ALT:
-                    st.altair_chart(
-                        alt.Chart(pc)
-                        .mark_arc(innerRadius=55, outerRadius=90)
-                        .encode(
-                            theta=alt.Theta("count:Q"),
-                            color=alt.Color(
-                                "property_type:N",
-                                scale=alt.Scale(range=CHART_COLORS),
-                                legend=alt.Legend(orient="right"),
-                            ),
+                if "property_type" in df and df["property_type"].notna().any():
+                    pc = df["property_type"].value_counts().reset_index()
+                    pc.columns = ["property_type", "count"]
+                    if _HAS_ALT:
+                        chart = alt.Chart(pc).mark_arc(innerRadius=55, outerRadius=90).encode(
+                            theta="count:Q",
+                            color=alt.Color("property_type:N", scale=alt.Scale(range=PALETTE),
+                                            legend=alt.Legend(orient="right")),
                             tooltip=["property_type:N", "count:Q"],
-                        )
-                        .properties(height=260)
-                        .configure_view(strokeWidth=0)
-                        .configure(background="transparent"),
-                        use_container_width=True,
-                    )
-                else:
-                    st.bar_chart(pc.set_index("property_type"))
+                        ).properties(height=270)
+                        st.altair_chart(alt_theme(chart), use_container_width=True)
+                    else:
+                        st.bar_chart(pc.set_index("property_type"))
 
-        st.markdown("<hr class='section-rule'>", unsafe_allow_html=True)
+        st.write("")
         if "decision" in df:
             decisions = df["decision"].dropna().unique().tolist()
             dfilter = st.multiselect("Filter by decision", decisions, default=decisions)
             view = df[df["decision"].isin(dfilter)] if dfilter else df
         else:
             view = df
-
         st.dataframe(view, use_container_width=True, hide_index=True)
