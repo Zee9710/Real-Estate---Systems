@@ -230,17 +230,34 @@ def badge(decision: str) -> str:
     return '<span class="badge badge-pending">قيد الانتظار · Pending</span>'
 
 
-def get_neighbours(retrieved_ids: str) -> list[dict]:
-    """Look up the stored nearest-neighbour case IDs (nearest first) in the
-    historical set and return their full rows, preserving order."""
-    if not retrieved_ids:
-        return []
-    ids = [x.strip() for x in str(retrieved_ids).split(",") if x.strip()]
+def _lookup_historical(ids: list[str]) -> dict:
     hist = load_historical()
     if hist.empty:
-        return []
+        return {}
     by_id = {r["case_id"]: r for r in hist.to_dict("records")}
-    return [by_id[i] for i in ids if i in by_id]
+    return {i: by_id[i] for i in ids if i in by_id}
+
+
+def get_neighbours(retrieved_ids: str, case_id: str | None = None) -> list[dict]:
+    """Return nearest historical neighbours (nearest first) with full attributes.
+
+    Prefers the live /neighbours endpoint so we get each neighbour's individual
+    distance; falls back to the IDs stored on the case (no per-neighbour distance)
+    when the backend is unreachable."""
+    live = api_get(f"/cases/incoming/{case_id}/neighbours?k={NEIGHBOURS_K}") if case_id else None
+    if live and live.get("neighbours"):
+        pairs = [(n["case_id"], n.get("distance")) for n in live["neighbours"]]
+    elif retrieved_ids:
+        pairs = [(x.strip(), None) for x in str(retrieved_ids).split(",") if x.strip()]
+    else:
+        return []
+    hist = _lookup_historical([cid for cid, _ in pairs])
+    out = []
+    for cid, dist in pairs:
+        row = dict(hist.get(cid, {"case_id": cid}))
+        row["_distance"] = dist
+        out.append(row)
+    return out
 
 
 def threshold_bar(distance: float, threshold: float):
@@ -347,17 +364,23 @@ def render_attributes(case: dict, hot_field: str | None = None):
 
 
 def render_neighbours(neighbours: list[dict]):
-    """Compact card list of similar historical cases (nearest first)."""
+    """Compact card list of similar historical cases (nearest first), each with
+    its individual distance so the reviewer can judge how close each match is."""
     if not neighbours:
         st.caption("لا توجد حالات مشابهة (no neighbours recorded).")
         return
     for rank, nb in enumerate(neighbours, 1):
         with st.container(border=True):
-            c = st.columns([3, 2, 2, 3])
+            c = st.columns([2, 2, 2, 2, 3])
             c[0].markdown(f"**#{rank} · {nb.get('case_id','')}**")
-            c[1].markdown(badge(nb.get("decision", "")), unsafe_allow_html=True)
-            c[2].markdown(f"<span class='pill'>{nb.get('reason_code','')}</span>", unsafe_allow_html=True)
-            c[3].caption(f"{nb.get('document_type','')} · {nb.get('property_type','')} · {nb.get('city','')}")
+            dist = nb.get("_distance")
+            c[1].markdown(
+                f"<span class='pill'>d = {dist:.4f}</span>" if dist is not None else "<span class='pill'>d = —</span>",
+                unsafe_allow_html=True,
+            )
+            c[2].markdown(badge(nb.get("decision", "")), unsafe_allow_html=True)
+            c[3].markdown(f"<span class='pill'>{nb.get('reason_code','')}</span>", unsafe_allow_html=True)
+            c[4].caption(f"{nb.get('document_type','')} · {nb.get('property_type','')} · {nb.get('city','')}")
 
 
 # ==================================================================
@@ -533,7 +556,7 @@ elif page.startswith("المراجعة"):
             nn = case.get("nn_distance")
             if nn is not None and threshold:
                 threshold_bar(float(nn), float(threshold))
-            render_neighbours(get_neighbours(case.get("retrieved_case_ids", "")))
+            render_neighbours(get_neighbours(case.get("retrieved_case_ids", ""), case_id=cid))
 
             st.divider()
             # ---- review actions ----
@@ -642,7 +665,7 @@ elif page.startswith("إضافة"):
                 nn = out.get("nn_distance")
                 if nn is not None and threshold:
                     threshold_bar(float(nn), float(threshold))
-                render_neighbours(get_neighbours(out.get("retrieved_case_ids", "")))
+                render_neighbours(get_neighbours(out.get("retrieved_case_ids", ""), case_id=case_id.strip()))
                 if out.get("needs_review"):
                     st.info("⚠️ تم ترشيح هذه الحالة وأضيفت إلى قائمة المراجعة (flagged → Review Queue).")
 

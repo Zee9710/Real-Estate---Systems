@@ -180,3 +180,21 @@ def calibration():
             "note": "No reindex run yet in this session. Run POST /reindex to calibrate.",
         }
     return _calibration_cache
+
+
+@app.get("/cases/incoming/{case_id}/neighbours")
+def neighbours(case_id: str, k: int = Query(default=5)):
+    """Per-neighbour distances for a case. Embeds the case attributes and queries
+    the active Chroma collection — reuses the same services the poller uses, so
+    no decision/novelty logic is duplicated here. Returns nearest-first."""
+    all_rows = db.read_incoming()
+    matched = [r for r in all_rows if r["case_id"] == case_id]
+    if not matched:
+        return {"error": f"case_id {case_id!r} not found", "neighbours": []}
+    emb = embedding_service.embed_case(matched[0])
+    ids, dists, _ = vector_store.query(emb, n_results=k)
+    return {
+        "case_id": case_id,
+        "threshold": novelty_detector.threshold,
+        "neighbours": [{"case_id": i, "distance": round(float(d), 4)} for i, d in zip(ids, dists)],
+    }
