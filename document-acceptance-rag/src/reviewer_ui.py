@@ -677,12 +677,16 @@ elif page == "Review Queue":
             )
             notes = st.text_area("Notes (optional)", key=f"notes_{cid}")
 
-            with st.expander("Override system decision"):
+            show_override = st.checkbox("Override system decision", key=f"showov_{cid}")
+            if show_override:
                 ov_decision = st.selectbox(
                     "New decision", ["— no override —", "Accepted", "Rejected"],
                     key=f"ovd_{cid}",
                 )
                 ov_reason = st.text_input("Override reason", key=f"ovr_{cid}")
+            else:
+                ov_decision = "— no override —"
+                ov_reason = ""
 
             if st.button("Submit review", key=f"submit_{cid}", use_container_width=True):
                 reviewer = st.session_state.reviewer_id.strip()
