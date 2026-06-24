@@ -1,0 +1,52 @@
+# ===================================================================
+# Acceptance rubric — the business-owned policy the adjudicator judges
+# novel cases against. Edit this file to change what "worth accepting"
+# means; no code changes needed.
+#
+# Two parts:
+#   1. bounds   — hard, deterministic plausibility checks (no AI). A novel
+#                 case that violates any bound is rejected outright, with the
+#                 violated bound named. Cheap, fully auditable.
+#   2. criteria — the written policy text handed to the LLM judge for the
+#                 cases that survive the bounds. The judge scores the case
+#                 against these named criteria and returns a confidence.
+# ===================================================================
+
+bounds:
+  # Plausible area (sqm) per property type. A novel case outside the range
+  # for its type is implausible -> REJECT (reason BOUND_AREA_IMPLAUSIBLE).
+  # Keys are matched case-insensitively against property_type; "default"
+  # applies when the type is unknown.
+  area_sqm:
+    apartment: [10, 2000]
+    "شقة": [10, 2000]
+    "شقه": [10, 2000]
+    villa: [50, 5000]
+    "فيلا": [50, 5000]
+    land: [50, 1000000]
+    "أرض": [50, 1000000]
+    commercial: [10, 50000]
+    "محل تجاري": [10, 50000]
+    "مكتب": [10, 50000]
+    "مستودع": [20, 100000]
+    default: [1, 2000000]
+
+  # Optional allow-list of cities. Leave empty to disable the check (recommended
+  # until you have a complete gazetteer — an incomplete list causes false
+  # rejects). A non-empty list rejects any city not present
+  # (reason BOUND_CITY_UNKNOWN).
+  valid_cities: []
+
+# Written acceptance policy for the LLM judge. Each criterion has an id the
+# judge must cite. Keep them concrete and checkable.
+criteria:
+  - id: R1
+    text: "Area must be plausible for the property type (e.g. an apartment is not tens of thousands of sqm)."
+  - id: R2
+    text: "The owner may be an individual OR a registered company/entity; both are acceptable."
+  - id: R3
+    text: "The property type and document type must form a sensible combination for a real-estate filing."
+  - id: R4
+    text: "The location (city/address) must read as a real, plausible jurisdiction rather than fabricated text."
+  - id: R5
+    text: "Nothing in the attributes should be internally contradictory or obviously fabricated."

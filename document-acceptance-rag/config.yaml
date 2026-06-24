@@ -23,6 +23,20 @@ novelty:
   # Lower = more sensitive (more flags). Start at 95, tune after first pilot run.
   threshold_percentile: 95
 
+adjudication:
+  # Master switch. When false, novel cases always go to a human (legacy behaviour).
+  enabled: true
+  rubric_path: "rubric.yaml"
+  # Confidence gates for auto-deciding a novel case (0..1).
+  # Below both gates the case is escalated to a human.
+  auto_accept_confidence: 0.85
+  auto_reject_confidence: 0.85
+
+hardening:
+  # After this many consistent, high-confidence judgments for the same pattern
+  # signature, the pattern is promoted to a deterministic learned rule.
+  promote_after: 3
+
 rules:
   # How old a registration_date can be (years) before triggering EXPIRED_REGISTRATION.
   max_registration_age_years: 10

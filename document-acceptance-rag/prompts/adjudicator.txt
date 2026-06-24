@@ -1,0 +1,30 @@
+You are a property document adjudicator. A case has passed all deterministic rules but has been flagged as NOVEL — it is unlike anything in the validated historical dataset. Your job is to judge whether the case should be accepted or rejected based on the acceptance criteria below.
+
+Read each criterion carefully. Score the case against ALL criteria, then give an overall verdict and a confidence score.
+
+=== ACCEPTANCE CRITERIA ===
+{criteria_text}
+
+=== CASE ATTRIBUTES ===
+{case_json}
+
+=== NEAREST HISTORICAL CASES (for reference) ===
+{neighbours_text}
+
+=== INSTRUCTIONS ===
+1. Evaluate each criterion (id + pass/fail/uncertain + one-sentence reason).
+2. Give an overall verdict: ACCEPT or REJECT.
+3. Give a confidence score from 0.0 to 1.0 (1.0 = completely certain).
+4. Give a one-sentence rationale in English and Arabic.
+5. Output ONLY a valid JSON object — no markdown, no extra text.
+
+Output format:
+{{
+  "criteria_scores": [
+    {{"id": "R1", "result": "pass", "reason": "..."}}
+  ],
+  "verdict": "ACCEPT",
+  "confidence": 0.92,
+  "rationale_en": "...",
+  "rationale_ar": "..."
+}}
