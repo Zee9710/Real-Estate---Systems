@@ -21,9 +21,11 @@ from typing import Any, Dict, Optional
 import yaml
 from fastapi import FastAPI, Query
 
+from .adjudicator import Adjudicator
 from .db_client import DBClient
 from .embeddings import EmbeddingService
 from .growth_loop import GrowthLoop, seed_collection
+from .hardening import HardeningLoop
 from .llm import QwenClient
 from .novelty import NoveltyDetector
 from .recommender import Recommender
@@ -63,6 +65,18 @@ qwen = QwenClient(
 
 prompt_template = Path("prompts/recommendation.txt").read_text(encoding="utf-8")
 
+adjudicator = Adjudicator(
+    config=cfg,
+    ollama_base=cfg["ollama"]["base_url"],
+    model=cfg["ollama"]["model"],
+    timeout=cfg["ollama"]["timeout_seconds"],
+)
+
+hardening = HardeningLoop(
+    db_client=db,
+    promote_after=cfg.get("hardening", {}).get("promote_after", 3),
+)
+
 recommender = Recommender(
     db=db,
     embedding_service=embedding_service,
@@ -71,6 +85,8 @@ recommender = Recommender(
     qwen=qwen,
     prompt_template=prompt_template,
     max_registration_age_years=cfg["rules"]["max_registration_age_years"],
+    adjudicator=adjudicator,
+    hardening=hardening,
 )
 
 growth_loop = GrowthLoop(
@@ -198,3 +214,15 @@ def neighbours(case_id: str, k: int = Query(default=5)):
         "threshold": novelty_detector.threshold,
         "neighbours": [{"case_id": i, "distance": round(float(d), 4)} for i, d in zip(ids, dists)],
     }
+
+
+@app.get("/learned-rules")
+def learned_rules():
+    return {"rules": hardening.list_learned_rules()}
+
+
+@app.post("/learned-rules/{rule_id}/deactivate")
+def deactivate_rule(rule_id: int):
+    with db._conn() as con:
+        con.execute("UPDATE learned_rules SET active=0 WHERE id=?", [rule_id])
+    return {"deactivated": rule_id}

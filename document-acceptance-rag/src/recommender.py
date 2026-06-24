@@ -1,13 +1,14 @@
 """
-End-to-end orchestrator: rule → novelty → explain → write-back.
+End-to-end orchestrator: rule → novelty → adjudicate → explain → write-back.
 
 Order of operations (per case):
 1. Parse input row.
 2. Rule engine → decision + reason_code.
 3. Novelty detector → nn_distance + is_novel_pattern.
-4. Review flagger → needs_review + flag_reason.
-5. Qwen → bilingual explanation.
-6. Write all output columns back to incoming_cases.
+4. If novel: check learned rules, then run adjudicator (bounds + LLM judge).
+5. Review flagger → needs_review + flag_reason.
+6. Qwen → bilingual explanation.
+7. Write all output columns back to incoming_cases.
 """
 from __future__ import annotations
 
@@ -15,11 +16,13 @@ import logging
 from datetime import date, datetime
 from typing import Any, Dict, Optional
 
+from .adjudicator import Adjudicator
 from .db_client import DBClient
 from .embeddings import EmbeddingService
+from .hardening import HardeningLoop
 from .llm import QwenClient
 from .novelty import NoveltyDetector
-from .review_flagger import evaluate_flags
+from .review_flagger import FlagReason, FlagResult, evaluate_flags
 from .rule_engine import Case, evaluate as rule_evaluate
 from .vector_store import VectorStore
 
@@ -84,6 +87,8 @@ class Recommender:
         qwen: QwenClient,
         prompt_template: str,
         max_registration_age_years: int = 10,
+        adjudicator: Optional[Adjudicator] = None,
+        hardening: Optional[HardeningLoop] = None,
     ):
         self.db = db
         self.embeddings = embedding_service
@@ -92,10 +97,11 @@ class Recommender:
         self.qwen = qwen
         self.prompt_template = prompt_template
         self.max_reg_age = max_registration_age_years
+        self.adjudicator = adjudicator
+        self.hardening = hardening
 
     def process_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
         case_id = row.get("case_id", "UNKNOWN")
-
         self.db.write_recommendation(case_id, {"status": "processing"})
 
         try:
@@ -108,11 +114,62 @@ class Recommender:
 
             novelty_result = self.novelty.check(row)
 
-            flag_result = evaluate_flags(
-                rule_fired=rule_result.rule_fired,
-                decision=decision,
-                is_novel_pattern=novelty_result.is_novel,
-            )
+            adj_verdict = None
+            adj_confidence = None
+            adj_rationale_en = None
+            adj_rationale_ar = None
+
+            # Only adjudicate novel cases that passed all rules
+            if novelty_result.is_novel and decision == "Accepted" and self.adjudicator:
+
+                # Check if a learned rule already covers this pattern
+                learned = self.hardening.check_learned(row) if self.hardening else None
+                if learned:
+                    adj_verdict = learned
+                    adj_confidence = 1.0
+                    adj_rationale_en = f"Decided by learned rule: {learned}."
+                    adj_rationale_ar = f"تم القرار بواسطة قاعدة متعلَّمة: {learned}."
+                    logger.info("Learned rule applied for %s → %s", case_id, learned)
+                else:
+                    # Fetch neighbour details for the judge
+                    ids, dists, metas = self.store.query(
+                        self.embeddings.embed_case(row), n_results=3
+                    )
+                    neighbours = [dict(m, case_id=i) for i, m in zip(ids, metas)]
+
+                    adj_result = self.adjudicator.adjudicate(row, neighbours)
+                    adj_verdict = adj_result.verdict
+                    adj_confidence = adj_result.confidence
+                    adj_rationale_en = adj_result.rationale_en
+                    adj_rationale_ar = adj_result.rationale_ar
+
+                    if self.hardening:
+                        self.hardening.record(row, adj_result)
+
+                    logger.info("Adjudicator: %s → %s (conf=%.2f)",
+                                case_id, adj_verdict, adj_confidence)
+
+                # If adjudicator gave a confident verdict, override needs_review
+                if adj_verdict in ("ACCEPT", "REJECT") and adj_verdict != "ESCALATE":
+                    if adj_verdict == "REJECT":
+                        decision = "Rejected"
+                        decision_ar = DECISION_AR["Rejected"]
+                        reason_code = "ADJ_REJECTED"
+                    # ACCEPT: keep decision as-is (already Accepted)
+                    # Either way: no human review needed
+                    flag_result = FlagResult(needs_review=False, flag_reason=FlagReason.NONE)
+                else:
+                    flag_result = evaluate_flags(
+                        rule_fired=rule_result.rule_fired,
+                        decision=decision,
+                        is_novel_pattern=novelty_result.is_novel,
+                    )
+            else:
+                flag_result = evaluate_flags(
+                    rule_fired=rule_result.rule_fired,
+                    decision=decision,
+                    is_novel_pattern=novelty_result.is_novel,
+                )
 
             explanation = self.qwen.explain(
                 case_dict=row,
@@ -128,8 +185,8 @@ class Recommender:
             output = {
                 "decision": decision,
                 "reason_code": reason_code,
-                "recommendation_en": explanation.recommendation_en,
-                "recommendation_ar": explanation.recommendation_ar,
+                "recommendation_en": adj_rationale_en or explanation.recommendation_en,
+                "recommendation_ar": adj_rationale_ar or explanation.recommendation_ar,
                 "retrieved_case_ids": ", ".join(novelty_result.retrieved_ids),
                 "nn_distance": round(novelty_result.nn_distance, 4),
                 "flag_reason": flag_result.flag_reason.value,
@@ -137,6 +194,8 @@ class Recommender:
                 "processed_at": datetime.utcnow().isoformat(),
                 "status": "done",
             }
+            if adj_confidence is not None:
+                output["adj_confidence"] = round(adj_confidence, 3)
 
             self.db.write_recommendation(case_id, output)
             logger.info("Processed %s → %s (%s)", case_id, decision, reason_code)

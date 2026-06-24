@@ -509,6 +509,7 @@ with st.sidebar:
             "Historical",
             "Calibration",
             "Rules",
+            "Learned Rules",
         ],
         label_visibility="collapsed",
     )
@@ -932,3 +933,48 @@ elif page == "Rules":
     st.info("These rules run first on every case. The AI explanation is generated after the rule decision is already made.")
     rules_df = pd.DataFrame(RULES, columns=["Reason code", "Rule", "Decision"])
     st.dataframe(rules_df, hide_index=True, use_container_width=True)
+
+
+# ==================================================================
+# PAGE: Learned Rules
+# ==================================================================
+elif page == "Learned Rules":
+    page_header("Learned Rules", "Patterns promoted from repeated adjudicator judgments — now decided automatically")
+    st.info(
+        "When the LLM judge makes the same high-confidence verdict on the same pattern "
+        f"3 times, it becomes a learned rule and skips human review permanently. "
+        "Deactivate any rule here if it was promoted incorrectly."
+    )
+
+    data = api_get("/learned-rules")
+    rules = (data or {}).get("rules", [])
+
+    if not rules:
+        st.caption("No learned rules yet. They appear here as the adjudicator accumulates consistent judgments.")
+    else:
+        for rule in rules:
+            with st.container(border=True):
+                c = st.columns([2, 2, 2, 2, 1])
+                c[0].markdown(f"**{rule.get('document_type','—')}**")
+                c[1].markdown(f"{rule.get('property_type','—')}")
+                verdict = rule.get("verdict", "")
+                color = "badge-accept" if verdict == "ACCEPT" else "badge-reject"
+                c[2].markdown(f"<span class='badge {color}'>{verdict}</span>", unsafe_allow_html=True)
+                c[3].caption(f"{rule.get('sample_count',0)} judgments · promoted {rule.get('promoted_at','')[:10]}")
+                active = rule.get("active", 1)
+                if active and c[4].button("Deactivate", key=f"deact_{rule['id']}"):
+                    api_post(f"/learned-rules/{rule['id']}/deactivate")
+                    st.rerun()
+                elif not active:
+                    c[4].caption("Inactive")
+
+    st.divider()
+    st.markdown("**Adjudication log — recent judgments**")
+    df_in = load_incoming()
+    if not df_in.empty and "adj_confidence" in df_in.columns:
+        adj = df_in[df_in["adj_confidence"].notna()][
+            ["case_id", "document_type", "property_type", "decision", "adj_confidence", "flag_reason", "processed_at"]
+        ].sort_values("processed_at", ascending=False).head(20)
+        st.dataframe(adj, hide_index=True, use_container_width=True)
+    else:
+        st.caption("No adjudicated cases yet.")
